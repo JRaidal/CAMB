@@ -47,17 +47,17 @@ jobs:
         run: |
           set -e  # Exit immediately if a command exits with a non-zero status
           
-          echo "Downloading gfortran-10.2-Catalina.dmg..."
-          curl -L -o gfortran-10.2-Catalina.dmg https://github.com/fxcoudert/gfortran-for-macOS/releases/download/10.2/gfortran-10.2-Catalina.dmg
+          echo "Downloading gfortran..."
+          curl -L -o gfortran-Intel-11.1-BigSur.dmg https://github.com/fxcoudert/gfortran-for-macOS/releases/download/11.1-bigsur-intel/gfortran-Intel-11.1-BigSur.dmg
           
           echo "Mounting gfortran-10.2-Catalina.dmg..."
-          hdiutil attach gfortran-10.2-Catalina.dmg
+          hdiutil attach gfortran-Intel-11.1-BigSur.dmg
           
           echo "Installing gfortran..."
-          sudo installer -pkg /Volumes/gfortran-10.2-Catalina/gfortran.pkg -target /
+          sudo installer -pkg /Volumes/gfortran-Intel-11.1-BigSur/gfortran.pkg -target /
           
-          echo "Unmounting gfortran-10.2-Catalina.dmg..."
-          hdiutil detach /Volumes/gfortran-10.2-Catalina
+          echo "Unmounting ..."
+          hdiutil detach /Volumes/gfortran-Intel-11.1-BigSur
           
           echo "Verifying gfortran installation..."
           gfortran --version
@@ -70,7 +70,7 @@ jobs:
           # all cp3xx, since old macs seem to only use osx 12+ builds if this is set not "none"
           # see consistency with get_tag() in setup.py
           CIBW_BUILD: cp311-*
-          MACOSX_DEPLOYMENT_TARGET: 12
+          MACOSX_DEPLOYMENT_TARGET: 11
           CIBW_SKIP: pp*
           CIBW_BUILD_VERBOSITY: 1
         run: python -m cibuildwheel --output-dir wheelhouse
