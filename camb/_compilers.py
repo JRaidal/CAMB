@@ -42,7 +42,10 @@ def check_gfortran(version=gfortran_min, msg=False, retry=False):
     gfortran_version = get_gfortran_version()
     version = str(version)
     if gfortran_version:
-        ok = parse_version(version) <= parse_version(gfortran_version)
+        try:
+            ok = parse_version(version) <= parse_version(gfortran_version)
+        except ValueError:
+            ok = True
     else:
         ok = False
     if not ok and is_windows and not retry:
