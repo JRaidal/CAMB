@@ -42,13 +42,33 @@ jobs:
           CIBW_BUILD_VERBOSITY: 1
         run: python -m cibuildwheel --output-dir wheelhouse
 
+      - name: Download and install gfortran-10.2
+        if: matrix.os == 'macos-12'
+        run: |
+          set -e  # Exit immediately if a command exits with a non-zero status
+          
+          echo "Downloading gfortran-10.2-Catalina.dmg..."
+          curl -L -o gfortran-10.2-Catalina.dmg https://github.com/fxcoudert/gfortran-for-macOS/releases/download/10.2/gfortran-10.2-Catalina.dmg
+          
+          echo "Mounting gfortran-10.2-Catalina.dmg..."
+          hdiutil attach gfortran-10.2-Catalina.dmg
+          
+          echo "Installing gfortran..."
+          sudo installer -pkg /Volumes/gfortran-10.2-Catalina/gfortran.pkg -target /
+          
+          echo "Unmounting gfortran-10.2-Catalina.dmg..."
+          hdiutil detach /Volumes/gfortran-10.2-Catalina
+          
+          echo "Verifying gfortran installation..."
+          gfortran --version
+
       - name: Build macos-12 wheels
         if: matrix.os == 'macos-12'
         env:
           # all cp3xx, since old macs seem to only use osx 12+ builds if this is set not "none"
           # see consistency with get_tag() in setup.py
           CIBW_BUILD: cp311-*
-          MACOSX_DEPLOYMENT_TARGET: 10.15
+          MACOSX_DEPLOYMENT_TARGET: 12
           CIBW_SKIP: pp*
           CIBW_BUILD_VERBOSITY: 1
         run: python -m cibuildwheel --output-dir wheelhouse
@@ -135,7 +155,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ macos-12, macos-13, macos-13-xlarge, macos-14, ubuntu-latest, windows-latest ]
+        os: [ macos-12, macos-13 ]
 
     steps:
       - uses: actions/setup-python@v5
