@@ -50,11 +50,11 @@ jobs:
           echo "Downloading gfortran..."
           curl -L -o gfortran-Intel-11.1-BigSur.dmg https://github.com/fxcoudert/gfortran-for-macOS/releases/download/11.1-bigsur-intel/gfortran-Intel-11.1-BigSur.dmg
           
-          echo "Mounting gfortran-10.2-Catalina.dmg..."
+          echo "Mounting.."
           hdiutil attach gfortran-Intel-11.1-BigSur.dmg
           
           echo "Installing gfortran..."
-          sudo installer -pkg /Volumes/gfortran-Intel-11.1-BigSur/gfortran-Intel-11.1-BigSur.pkg -target /
+          sudo installer -pkg /Volumes/gfortran-Intel-11.1-BigSur/gfortran.pkg -target /
           
           echo "Unmounting ..."
           hdiutil detach /Volumes/gfortran-Intel-11.1-BigSur
