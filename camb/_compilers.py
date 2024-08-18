@@ -45,6 +45,7 @@ def check_gfortran(version=gfortran_min, msg=False, retry=False):
         try:
             ok = parse_version(version) <= parse_version(gfortran_version)
         except ValueError:
+            print('Unknown gfortran version: %s' % gfortran_version)
             ok = True
     else:
         ok = False
