@@ -61,6 +61,8 @@ jobs:
           
           echo "Verifying gfortran installation..."
           gfortran --version
+          gfortran -dumpversion
+          gfortran -dumpfullversion
 
       - name: Build macos-12 wheels
         if: matrix.os == 'macos-12'
