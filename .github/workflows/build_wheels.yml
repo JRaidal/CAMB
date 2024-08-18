@@ -54,7 +54,7 @@ jobs:
           hdiutil attach gfortran-Intel-11.1-BigSur.dmg
           
           echo "Installing gfortran..."
-          sudo installer -pkg /Volumes/gfortran-Intel-11.1-BigSur/gfortran.pkg -target /
+          sudo installer -pkg /Volumes/gfortran-Intel-11.1-BigSur/gfortran-Intel-11.1-BigSur.pkg -target /
           
           echo "Unmounting ..."
           hdiutil detach /Volumes/gfortran-Intel-11.1-BigSur
