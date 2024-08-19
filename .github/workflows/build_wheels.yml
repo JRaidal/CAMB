@@ -42,22 +42,22 @@ jobs:
           CIBW_BUILD_VERBOSITY: 1
         run: python -m cibuildwheel --output-dir wheelhouse
 
-      - name: Download and install gfortran-10.2
+      - name: Download and install gfortran
         if: matrix.os == 'macos-12'
         run: |
           set -e  # Exit immediately if a command exits with a non-zero status
           
           echo "Downloading gfortran..."
-          curl -L -o gfortran-Intel-11.1-BigSur.dmg https://github.com/fxcoudert/gfortran-for-macOS/releases/download/11.1-bigsur-intel/gfortran-Intel-11.1-BigSur.dmg
+          curl -L -o gfortran-Intel-11.2-BigSur.dmg https://github.com/fxcoudert/gfortran-for-macOS/releases/download/11.2-bigsur-intel/gfortran-Intel-11.2-BigSur.dmg
           
           echo "Mounting.."
-          hdiutil attach gfortran-Intel-11.1-BigSur.dmg
+          hdiutil attach gfortran-Intel-11.2-BigSur.dmg
           
           echo "Installing gfortran..."
-          sudo installer -pkg /Volumes/gfortran-Intel-11.1-BigSur/gfortran.pkg -target /
+          sudo installer -pkg /Volumes/gfortran-Intel-11.2-BigSur/gfortran.pkg -target /
           
           echo "Unmounting ..."
-          hdiutil detach /Volumes/gfortran-Intel-11.1-BigSur
+          hdiutil detach /Volumes/gfortran-Intel-11.2-BigSur
           
           echo "Verifying gfortran installation..."
           gfortran --version

@@ -96,7 +96,7 @@ COMMON_FFLAGS = -MMD -cpp -ffree-line-length-none -fmax-errors=4 -fopenmp
 FFLAGS = -O3 $(COMMON_FFLAGS)
 DEBUGFLAGS = -g -fbacktrace -ffpe-trap=invalid,overflow,zero -fbounds-check $(COMMON_FFLAGS)
 ifeq ($(shell uname -s),Darwin)
-SFFLAGS = -dynamiclib #-fpic
+SFFLAGS = -dynamiclib -static-libgfortran -static-libgcc  # -fpic
 else
 SFFLAGS = -shared -fpic
 endif
