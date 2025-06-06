@@ -34,9 +34,14 @@ make test-all
 - Easy to extend for new test files
 
 ## Test Results Summary:
-✅ **All patterns tested show NO MEMORY LEAKS** across gfortran 9-15
+✅ **Fortran patterns show NO MEMORY LEAKS** across gfortran 9-15
 - Simple allocatable patterns: SAFE
-- Complex CAMB-style nested types: SAFE  
+- Complex CAMB-style nested types: SAFE
 - Both debug and optimized builds: SAFE
 - Assignment operations: SAFE
 - Large memory allocations: SAFE
+
+⚠️ **Python wrapper**: Uses CAMB's built-in memory monitoring
+- Detects memory usage patterns between iterations
+- Small variations may be normal system behavior
+- No valgrind needed (inappropriate for Python)
