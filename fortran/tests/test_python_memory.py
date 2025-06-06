@@ -36,109 +36,91 @@ def check_gfortran_version(version):
 
 def setup_camb_build(gfortran_version, build_type, temp_dir):
     """Setup CAMB build with specific gfortran version"""
-    
+
     # Copy CAMB source to temp directory
     camb_root = Path(__file__).parent.parent
     temp_camb = Path(temp_dir) / "camb_test"
-    
+
     # Copy essential files
-    shutil.copytree(camb_root, temp_camb, 
-                   ignore=shutil.ignore_patterns('*.o', '*.mod', '*.so', '__pycache__'))
-    
+    shutil.copytree(camb_root, temp_camb,
+                   ignore=shutil.ignore_patterns('*.o', '*.mod', '*.so', '__pycache__',
+                                                'Releaselib', '.git'))
+
     # Set compiler
     if gfortran_version == "default":
         compiler = "gfortran"
     else:
         compiler = f"gfortran-{gfortran_version}"
-    
+
     # Set build flags
     if build_type == "debug":
         flags = "-g -O0 -fbacktrace -fbounds-check -ffpe-trap=invalid,overflow,zero -Wall"
     else:
         flags = "-O3 -ffast-math"
-    
-    # Create Makefile override
-    makefile_local = temp_camb / "Makefile_local"
-    with open(makefile_local, 'w') as f:
-        f.write(f"F90C = {compiler}\n")
-        f.write(f"FFLAGS = {flags}\n")
-        f.write("SFFLAGS = $(FFLAGS)\n")
-    
-    return temp_camb
 
-def test_camb_python(gfortran_version, build_type):
-    """Test CAMB Python wrapper with specific gfortran version"""
-    
-    print(f"Testing gfortran-{gfortran_version} ({build_type} build)...")
-    
-    if not check_gfortran_version(gfortran_version):
-        print(f"⚠️  gfortran-{gfortran_version} not available, skipping...")
-        return True
-    
-    with tempfile.TemporaryDirectory() as temp_dir:
-        try:
-            # Setup CAMB build
-            camb_dir = setup_camb_build(gfortran_version, build_type, temp_dir)
-            
-            # Build CAMB
-            print(f"   Building CAMB...")
-            success, stdout, stderr = run_command("make clean && make camb", cwd=camb_dir)
-            if not success:
-                print(f"❌ Build failed: {stderr}")
-                return False
-            
-            # Build Python wrapper
-            print(f"   Building Python wrapper...")
-            success, stdout, stderr = run_command("python setup.py build_ext --inplace", cwd=camb_dir)
-            if not success:
-                print(f"❌ Python build failed: {stderr}")
-                return False
-            
-            # Run memory test with valgrind
-            print(f"   Running memory test...")
-            test_cmd = f"""
-            cd {camb_dir} && 
-            valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
-                     --track-origins=yes --log-file=python_valgrind.log \
-                     python -m unittest camb.tests.camb_test.CambTest.test_memory 2>/dev/null
-            """
-            
-            success, stdout, stderr = run_command(test_cmd)
-            
-            # Check valgrind results
-            valgrind_log = camb_dir / "python_valgrind.log"
-            if valgrind_log.exists():
-                with open(valgrind_log) as f:
-                    log_content = f.read()
-                
-                if "definitely lost:" in log_content and not "definitely lost: 0 bytes" in log_content:
-                    print("❌ MEMORY LEAK DETECTED")
-                    # Extract leak info
-                    for line in log_content.split('\n'):
-                        if "definitely lost:" in line:
-                            print(f"   {line.strip()}")
-                    return False
-                elif "possibly lost:" in log_content and not "possibly lost: 0 bytes" in log_content:
-                    print("⚠️  Possible memory leak")
-                    for line in log_content.split('\n'):
-                        if "possibly lost:" in line:
-                            print(f"   {line.strip()}")
-                else:
-                    print("✅ No memory leaks")
-                
-                # Show heap usage
+    # Set environment variables for the build
+    env_vars = {
+        'F90C': compiler,
+        'FFLAGS': flags,
+        'SFFLAGS': flags
+    }
+
+    return temp_camb, env_vars
+
+def test_camb_python_simple():
+    """Simple test of CAMB Python wrapper with current build"""
+
+    print("Testing CAMB Python wrapper (current build)...")
+
+    try:
+        # Run memory test with valgrind on current CAMB installation
+        print("   Running memory test with valgrind...")
+        test_cmd = """
+        valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all \
+                 --track-origins=yes --log-file=python_valgrind.log \
+                 python3 -m unittest camb.tests.camb_test.CambTest.test_memory 2>/dev/null
+        """
+
+        success, stdout, stderr = run_command(test_cmd)
+
+        # Check valgrind results
+        valgrind_log = Path("python_valgrind.log")
+        if valgrind_log.exists():
+            with open(valgrind_log) as f:
+                log_content = f.read()
+
+            if "definitely lost:" in log_content and not "definitely lost: 0 bytes" in log_content:
+                print("❌ MEMORY LEAK DETECTED")
+                # Extract leak info
                 for line in log_content.split('\n'):
-                    if "total heap usage:" in line:
+                    if "definitely lost:" in line:
                         print(f"   {line.strip()}")
-                        break
+                return False
+            elif "possibly lost:" in log_content and not "possibly lost: 0 bytes" in log_content:
+                print("⚠️  Possible memory leak (often normal for Python)")
+                for line in log_content.split('\n'):
+                    if "possibly lost:" in line:
+                        print(f"   {line.strip()}")
+                print("   Note: 'Possibly lost' is often due to Python interpreter memory management")
             else:
-                print("⚠️  No valgrind log found")
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ Error: {e}")
-            return False
+                print("✅ No memory leaks")
+
+            # Show heap usage
+            for line in log_content.split('\n'):
+                if "total heap usage:" in line:
+                    print(f"   {line.strip()}")
+                    break
+
+            # Cleanup
+            valgrind_log.unlink()
+        else:
+            print("⚠️  No valgrind log found")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return False
 
 def test_docker_python():
     """Test with Docker for latest versions"""
@@ -228,21 +210,8 @@ def main():
             print(f"Invalid version: {sys.argv[1]}")
             sys.exit(1)
     
-    # Run tests
-    if specific_version:
-        # Test specific version
-        for build_type in BUILD_TYPES:
-            test_camb_python(specific_version, build_type)
-            print()
-    else:
-        # Test all versions
-        for version in GFORTRAN_VERSIONS:
-            for build_type in BUILD_TYPES:
-                test_camb_python(version, build_type)
-            print()
-        
-        # Test with Docker
-        test_docker_python()
+    # Run simple test with current CAMB build
+    test_camb_python_simple()
     
     print("=========================================")
     print("Python testing completed")

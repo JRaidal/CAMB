@@ -46,19 +46,18 @@ sudo apt install -y valgrind gfortran-9 gfortran-10 gfortran-11 gfortran-12 gfor
 ### Python Testing
 
 ```bash
-# Test CAMB Python wrapper
-python3 test_python_memory.py [gfortran_version]
+# Test CAMB Python wrapper (requires CAMB to be built first)
+python3 test_python_memory.py
 
-# Examples:
-python3 test_python_memory.py               # All versions
-python3 test_python_memory.py 12            # gfortran-12 only
+# Build CAMB first if needed:
+python3 setup.py make
 ```
 
 ### Makefile Targets
 
 ```bash
 make test-memory FILE=memory_leak_test.f90   # Test specific file
-make test-python VERSION=13                 # Test Python with gfortran-13
+make test-python                            # Test Python wrapper
 make test-all                               # Test everything
 make test-docker                            # Test with latest Docker versions
 make clean                                  # Clean up
