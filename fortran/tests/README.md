@@ -51,6 +51,9 @@ python3 test_python_memory.py
 
 # Build CAMB first if needed:
 python3 setup.py make
+
+# Note: Uses CAMB's built-in memory test, not valgrind
+# The test monitors memory usage patterns internally
 ```
 
 ### Makefile Targets
