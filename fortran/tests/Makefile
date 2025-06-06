@@ -36,11 +36,7 @@ endif
 
 # Test CAMB Python wrapper
 test-python:
-ifdef VERSION
-	python3 test_python_memory.py $(VERSION)
-else
-	python3 test_python_memory.py
-endif
+	cd ../.. && python3 fortran/tests/test_python_memory.py
 
 # Test all patterns
 test-all: test-memory-all test-python
