@@ -44,7 +44,9 @@ test_version() {
         return 0
     fi
     
-    echo "Testing $gfortran_cmd ($build_type build)..."
+    # Get exact version
+    local exact_version=$($gfortran_cmd --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+    echo "Testing $gfortran_cmd v$exact_version ($build_type build)..."
     
     # Set compiler flags based on build type
     if [ "$build_type" = "debug" ]; then
