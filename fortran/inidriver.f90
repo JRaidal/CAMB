@@ -1,16 +1,11 @@
 program driver
     use CAMB
-    use SpherBessels
-    use config
     implicit none
     integer :: i
 
     do i = 1, 3
         call test()
     end do
-
-    call Bessels_Free()
-    deallocate(highL_CL_template)
 
 contains
 

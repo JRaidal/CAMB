@@ -23,13 +23,3 @@ jobs:
             valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all ./camb 
         "
 
-    - name: Upload Valgrind Output on Failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: valgrind-output-${{ github.sha }}
-        path: |
-          fortran/
-          !fortran/*.o
-          !fortran/*.mod
-        if-no-files-found: warn
