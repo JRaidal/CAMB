@@ -267,7 +267,7 @@
     procedure :: grho_no_de
     procedure :: GetReionizationOptDepth
     procedure :: rofChi
-    procedure :: cosfuncCAMBdata_Destructor
+    procedure :: cosfunc
     procedure :: tanfunc
     procedure :: invsinfunc
     procedure :: GetComputedPKRedshifts
