@@ -267,13 +267,14 @@
     procedure :: grho_no_de
     procedure :: GetReionizationOptDepth
     procedure :: rofChi
-    procedure :: cosfunc
+    procedure :: cosfuncCAMBdata_Destructor
     procedure :: tanfunc
     procedure :: invsinfunc
     procedure :: GetComputedPKRedshifts
     procedure :: binary_search
     procedure, nopass :: PythonClass => CAMBdata_PythonClass
     procedure, nopass :: SelfPointer => CAMBdata_SelfPointer
+    final :: CAMBdata_Destructor
     end type CAMBdata
 
     interface
@@ -305,6 +306,12 @@
     P => PType
 
     end subroutine CAMBdata_SelfPointer
+
+    subroutine CAMBdata_Destructor(this)
+    type(CAMBdata) :: this
+    !Fixes it
+    !call Free_ClTransfer(this%ClData%CTransTens)
+    end subroutine CAMBdata_Destructor
 
     subroutine CAMBdata_SetParams(this, P, error, DoReion, call_again, background_only)
     !Initialize background variables; does not yet calculate thermal history

@@ -853,9 +853,23 @@ class CambTest(unittest.TestCase):
             last_usage = -1
             for i in range(3):
                 pars = camb.CAMBparams()
-                pars.set_cosmology(H0=70, ombh2=0.022, omch2=0.12, mnu=0.06, omk=0, tau=0.17)
-                results = camb.get_results(pars)  # noqa
-                del pars, results
+                pars.set_cosmology(H0=70, ombh2=0.022, omch2=0.12, mnu=0.06, omk=0, tau=0.07)
+                pars.set_for_lmax(lmax=2000, lens_potential_accuracy=1)
+                pars.WantTensors = True
+                pars.InitPower.set_params(ns=0.96, r=0.1, nt=0)
+                results = camb.get_transfer_functions(pars, only_time_sources=True)
+                results.Params.InitPower.set_params(ns=0.96, r=0.2, nt=2)
+                results.power_spectra_from_transfer()
+                results2 = results.copy()
+                results.Params.InitPower.set_params(ns=0.98, r=0.2, nt=2)
+                results.power_spectra_from_transfer()
+                results2.power_spectra_from_transfer()
+                results.Params.InitPower.set_params(ns=0.98, r=0.1, nt=2)
+                results.power_spectra_from_transfer()
+                pars.set_cosmology(H0=70, ombh2=0.022, omch2=0.12, mnu=0.06, omk=0, tau=0.06)
+                results2 = camb.get_transfer_functions(pars, only_time_sources=True)
+                # noqa
+                del pars, results, results2
                 gc.collect()
                 usage = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0, 1)
                 if 0 < last_usage != usage:
