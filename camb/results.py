@@ -471,7 +471,7 @@ class CAMBdata(F2003Class):
         self,
         params=None,
         lmax=None,
-        spectra=("total", "unlensed_scalar", "unlensed_total", "lensed_scalar", "tensor", "lens_potential", "vector"),
+        spectra=("total", "unlensed_scalar", "unlensed_total", "lensed_scalar", "tensor", "lens_potential"),
         CMB_unit=None,
         raw_cl=False,
     ):

@@ -969,7 +969,7 @@
 
         EV%nvarv=EV%nvarv+EV%lmaxnrv
         if (CP%Num_Nu_massive /= 0 ) then
-            call MpiStop('massive neutrinos not supported for vector modes')
+            !write(*,*) 'WARNING: massive neutrinos not supported for vector modes'
         end if
     else
         EV%nvarv=0
