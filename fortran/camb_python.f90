@@ -434,6 +434,10 @@
             tot_scalar_cls(1:4,l) = tot_scalar_cls(1:4,l) &
                 + Data%CLData%Cl_tensor(l, CT_Temp:CT_Cross)
         end if
+        if (Data%CP%ActiveSources%active_mode_idx > 0 .and. Data%CP%WantVectors .and. l <= Data%CP%Max_l) then
+            tot_scalar_cls(1:4,l) = tot_scalar_cls(1:4,l) &
+                + Data%CLData%Cl_vector(l, CT_Temp:CT_Cross)
+        end if
     end do
 
     end subroutine CAMB_SetTotCls
@@ -522,7 +526,7 @@
     end if
 
     end subroutine CAMB_SetTensorCls
-    
+
     subroutine CAMB_SetVectorCls(State,lmax, vector_Cls)
     Type(CAMBdata) :: State
     integer, intent(IN) :: lmax

@@ -3,188 +3,362 @@
 import numpy as np
 import sys
 import os
+import argparse
 # Get the absolute path to the CAMB root directory
 CAMB_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if CAMB_dir not in sys.path:
     sys.path.insert(0, CAMB_dir)
 
-from camb.active_sources import activesources
+from camb.active_sources import ActiveSources
 import camb
 import matplotlib.pyplot as plt
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-NPZ_FILENAME = os.path.join(script_dir, "correlator_table.npz")
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description='Calculate CMB power spectra with UETC string sources',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
 
-N_MODES_TO_SUM = 32  # Number of UETC eigenmodes to sum for the string signal
-LMAX_PLOT = 4000    # Max multipole for plotting
-CMB_UNIT_OUTPUT = 'muK' # 'muK' for muK^2 units, 'K' for K^2 units
-pol_mode_idx=0;# !indices: TT, EE, BB, TE
+    # Individual mode flags - can be combined
+    parser.add_argument(
+        '--scalar', '-s',
+        action='store_true',
+        help='Enable scalar perturbations'
+    )
 
-# --- Plotting Style (Optional) ---
-plt.style.use('seaborn-v0_8-colorblind') # Or any other style you prefer
+    parser.add_argument(
+        '--vector', '-v',
+        action='store_true',
+        help='Enable vector perturbations'
+    )
 
-# ------------------------------------------------------------------------------
-# 1. CAMB Parameter Setup
-# ------------------------------------------------------------------------------
-print("Setting up CAMB parameters...")
-pars = camb.CAMBparams()
-# Have turned off massive neutrinos to avoid issues with the vector modes
-pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.0, omk=0, tau=0.06)
-pars.max_l_tensor = 1500
+    parser.add_argument(
+        '--tensor', '-t',
+        action='store_true',
+        help='Enable tensor perturbations'
+    )
 
-pars.WantScalars = True
-pars.WantVectors = False
-pars.WantTensors = False
-pars.DoLensing = False
+    # Number of eigenmodes
+    parser.add_argument(
+        '--nmodes', '-n',
+        type=int,
+        default=32,
+        help='Number of UETC eigenmodes to sum'
+    )
 
-# if pars.WantTensors:
-#     pars.InitPower.set_params(As=2e-9, ns=0.965, r=0.1) 
-# else:
-#     pars.InitPower.set_params(As=2e-9, ns=0.965, r=0.0) 
+    # Maximum multipole for plotting
+    parser.add_argument(
+        '--lmax', '-l',
+        type=int,
+        default=4000,
+        help='Maximum multipole for plotting'
+    )
 
-# ------------------------------------------------------------------------------
-# 2. Load UETC Data and Initialize Custom Object
-# ------------------------------------------------------------------------------
-print(f"Loading UETC data from: {NPZ_FILENAME}...")
-correlator_data = np.load(NPZ_FILENAME)
-k_grid = correlator_data['k_grid']
-tau_grid = correlator_data['ktau_grid']
-all_eigenfunctions = correlator_data['eigenfunctions']
-all_eigenfunctions_d_dlogkt = correlator_data['eigenfunctions_d_dlogkt']
-all_eigenvalues_S = correlator_data['eigenvalues_S']
-all_eigenvalues_00 = correlator_data['eigenvalues_00']
-all_eigenvalues_V = correlator_data['eigenvalues_V']
-all_eigenvalues_T = correlator_data['eigenvalues_T']
-string_p_mu = correlator_data['string_params_mu'].item()
-nmodes_from_file = correlator_data['nmodes'].item()
-weighting_from_file = correlator_data['weighting_gamma'].item()
-print("Correlator data loaded.")
+    # CMB units
+    parser.add_argument(
+        '--units', '-u',
+        type=str,
+        choices=['muK', 'K'],
+        default='muK',
+        help='CMB units for output'
+    )
 
-print("Initializing custom Fortran object...")
-my_custom_obj = activesources()
-my_custom_obj.set_correlator_table(
-    k_grid=k_grid,
-    tau_grid=tau_grid,
-    eigenfunctions=all_eigenfunctions,
-    eigenfunctions_d_dlogkt=all_eigenfunctions_d_dlogkt,
-    eigenvalues_S=all_eigenvalues_S,
-    eigenvalues_00=all_eigenvalues_00,
-    eigenvalues_V=all_eigenvalues_V,
-    eigenvalues_T=all_eigenvalues_T,
-    string_params_mu=string_p_mu,
-    nmodes_param=nmodes_from_file,
-    weighting_param=weighting_from_file
-)
-print("Fortran data transfer successful")
-pars.ActiveSources = my_custom_obj 
+    # Data file path
+    parser.add_argument(
+        '--datafile', '-d',
+        type=str,
+        default=None,
+        help='Path to correlator data file (default: correlator_table.npz in script directory)'
+    )
 
-# ------------------------------------------------------------------------------
-# 3. Calculate Baseline C_l^{EE} (No UETC Sources)
-# ------------------------------------------------------------------------------
-print("Calculating baseline C_l^{EE} (UETC sources OFF)...")
-my_custom_obj.set_active_eigenmode(0) 
-results_baseline = camb.get_results(pars)
+    # Output file
+    parser.add_argument(
+        '--output', '-o',
+        type=str,
+        default=None,
+        help='Output filename for plot (if not specified, plot is shown)'
+    )
 
-if pars.WantVectors:
-    power_spectra_baseline = results_baseline.get_vector_cls(CMB_unit=CMB_UNIT_OUTPUT, raw_cl=False)
-    cl_baseline_dl = power_spectra_baseline[:,pol_mode_idx]
-else:
-    power_spectra_baseline = results_baseline.get_cmb_power_spectra(pars, CMB_unit=CMB_UNIT_OUTPUT, raw_cl=False)
-    cl_baseline_dl = power_spectra_baseline['total'][:,pol_mode_idx]
+    # String tension parameter
+    parser.add_argument(
+        '--gmu',
+        type=float,
+        default=2e-7,
+        help='String tension parameter (default: 2e-7)'
+    )
 
-lmax_calc = cl_baseline_dl.shape[0] - 1
-ls_calc = np.arange(lmax_calc + 1)
+    # Disable plotting
+    parser.add_argument(
+        '--no-plot',
+        action='store_true',
+        help='Disable plotting'
+    )
 
-print(f"Baseline C_l^{{EE}} calculated up to LMAX={lmax_calc}.")
+    return parser.parse_args()
 
-# ------------------------------------------------------------------------------
-# 4. Calculate UETC C_l^{EE} by Summing Modes
-# ------------------------------------------------------------------------------
+def setup_camb_params(args):
+    """Setup CAMB parameters based on arguments"""
+    # Validate that at least one mode is selected
+    if not (args.scalar or args.vector or args.tensor):
+        print("WARNING: No modes selected, defaulting to scalar mode")
+        args.scalar = True
 
-if pars.WantTensors and not pars.WantVectors and not pars.WantScalars:
-    # pars.InitPower.set_params(As=1, ns=4, r=1, nt=3, pivot_scalar=1.0, pivot_tensor=1.0) 
-    # scale_factor = 16/(2*np.pi**2)
-    scale_factor=1
-elif pars.WantVectors and not pars.WantTensors and not pars.WantScalars:
-    pars.InitPower.set_params(As=1, ns=4, r=0, nt=3, pivot_scalar=1.0, pivot_tensor=1.0) 
-    # Fudge factor of 2
-    # scale_factor = 2 * 8/(2*np.pi**2)
-    scale_factor=1
-elif pars.WantScalars and not pars.WantTensors and not pars.WantVectors:
-    # pars.InitPower.set_params(As=1, ns=4, r=0, nt=3, pivot_scalar=1.0, pivot_tensor=1.0) 
-    pars.scalar_initial_condition = 0
-    scale_factor=1
-    # scale_factor = 1/(2*np.pi**2)
-else:
-    print("Error: Invalid combination of modes.")
-    exit()
+    enabled_modes = []
+    if args.scalar:
+        enabled_modes.append('scalar')
+    if args.vector:
+        enabled_modes.append('vector')
+    if args.tensor:
+        enabled_modes.append('tensor')
 
-actual_n_modes_to_sum = min(N_MODES_TO_SUM, nmodes_from_file)
-print(f"Calculating UETC C_l^{{EE}} by summing {actual_n_modes_to_sum} eigenmodes...")
+    print(f"Setting up CAMB parameters for {', '.join(enabled_modes)} mode(s)...")
+    pars = camb.CAMBparams()
 
-cl_strings_sum_dl = np.zeros_like(cl_baseline_dl)
+    # Have turned off massive neutrinos to avoid issues with the vector modes
+    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.0, omk=0, tau=0.06)
 
-# pars.InitPower.set_params(As=1, ns=1, r=1) 
-for i_mode in range(1, actual_n_modes_to_sum + 1):
-    print(f"  Processing eigenmode {i_mode}/{actual_n_modes_to_sum}...")
-    my_custom_obj.set_active_eigenmode(i_mode)
-    
-    pars.ActiveSources = my_custom_obj # Re-assign to ensure CAMB sees the updated active_mode
+    # Set maximum l values for different modes
+    if args.tensor:
+        pars.max_l_tensor = 1500
+    if args.scalar or args.vector:
+        pars.max_l = 4000  # For scalar and vector modes
 
-    results_mode_i = camb.get_results(pars)
+    # Set mode types based on arguments
+    pars.WantScalars = args.scalar
+    pars.WantVectors = args.vector
+    pars.WantTensors = args.tensor
 
-    if pars.WantVectors:
-        power_spectra_mode_i = results_mode_i.get_vector_cls(CMB_unit=CMB_UNIT_OUTPUT, raw_cl=False)
-        cl_mode_i_dl = power_spectra_mode_i[:,pol_mode_idx]
+    if args.vector:
+        print("  - Note: Massive neutrinos disabled for vector modes")
+
+    pars.DoLensing = False
+
+    return pars
+
+def load_correlator_data(args):
+    """Load UETC correlator data"""
+    if args.datafile is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        npz_filename = os.path.join(script_dir, "correlator_table.npz")
     else:
-        power_spectra_mode_i = results_mode_i.get_cmb_power_spectra(pars, CMB_unit=CMB_UNIT_OUTPUT, raw_cl=False)
-        cl_mode_i_dl = power_spectra_mode_i['total'][:,pol_mode_idx] # !indices: TT, EE, BB, TE
-        
-    min_len = min(len(cl_strings_sum_dl), len(cl_mode_i_dl))
-    
-    cl_strings_sum_dl[:min_len] += cl_mode_i_dl[:min_len]
+        npz_filename = args.datafile
 
-my_custom_obj.set_active_eigenmode(0) 
-print("UETC C_l^{EE} calculation finished.")
+    print(f"Loading UETC data from: {npz_filename}...")
+    correlator_data = np.load(npz_filename)
 
-# Assumes linear addition of power spectra.
-Cl_strings = scale_factor * cl_strings_sum_dl
+    return {
+        'k_grid': correlator_data['k_grid'],
+        'tau_grid': correlator_data['ktau_grid'],
+        'eigenfunctions': correlator_data['eigenfunctions'],
+        'eigenfunctions_d_dlogkt': correlator_data['eigenfunctions_d_dlogkt'],
+        'eigenvalues_S': correlator_data['eigenvalues_S'],
+        'eigenvalues_00': correlator_data['eigenvalues_00'],
+        'eigenvalues_V': correlator_data['eigenvalues_V'],
+        'eigenvalues_T': correlator_data['eigenvalues_T'],
+        'string_p_mu': correlator_data['string_params_mu'].item(),
+        'nmodes_from_file': correlator_data['nmodes'].item(),
+        'weighting_from_file': correlator_data['weighting_gamma'].item()
+    }
 
-# ------------------------------------------------------------------------------
-# 5. Plotting
-# ------------------------------------------------------------------------------
-print("Plotting results...")
-fig, axs = plt.subplots(1, 2, figsize=(16, 6))  # 1 row, 2 columns
+def setup_active_sources(correlator_data, args):
+    """Setup ActiveSources object with correlator data"""
+    print("Initializing custom Fortran object...")
+    active_sources = ActiveSources()
+    active_sources.set_correlator_table(
+        k_grid=correlator_data['k_grid'],
+        tau_grid=correlator_data['tau_grid'],
+        eigenfunctions=correlator_data['eigenfunctions'],
+        eigenfunctions_d_dlogkt=correlator_data['eigenfunctions_d_dlogkt'],
+        eigenvalues_S=correlator_data['eigenvalues_S'],
+        eigenvalues_00=correlator_data['eigenvalues_00'],
+        eigenvalues_V=correlator_data['eigenvalues_V'],
+        eigenvalues_T=correlator_data['eigenvalues_T'],
+        string_params_mu=correlator_data['string_p_mu'],
+        nmodes_param=correlator_data['nmodes_from_file'],
+        weighting_param=correlator_data['weighting_from_file']
+    )
+    print("Fortran data transfer successful")
 
-plot_mask = (ls_calc >= 1) & (ls_calc <= LMAX_PLOT)
-ls_plot = ls_calc[plot_mask]
+    return active_sources
 
-# First plot: Strings EE
-axs[0].plot(ls_plot, Cl_strings[plot_mask]*(2e-7)**2, label='Strings', color='C1', linestyle='-')
-axs[0].set_xlabel(r'$\ell$')
-axs[0].set_ylabel(r'$\ell(\ell+1)C_\ell/2\pi \, [\mu K^2]$')
-axs[0].set_title('Strings Power Spectrum')
-axs[0].set_xlim([2, LMAX_PLOT])
-axs[0].set_xscale('log')
-axs[0].legend()
-axs[0].grid(True, which="both", ls="-", alpha=0.5)
+def calculate_power_spectra(pars, args):
+    """Calculate power spectra for baseline and UETC sources for all polarization components"""
 
+    # Calculate baseline (no UETC sources)
+    print("Calculating baseline C_l (UETC sources OFF)...")
+    pars.ActiveSources.set_active_eigenmode(0)
+    results_baseline = camb.get_results(pars)
 
-# Second plot: Baseline EE
-axs[1].plot(ls_plot, cl_baseline_dl[plot_mask], label='Baseline', color='C0', linestyle='-')
-axs[1].set_xlabel(r'$\ell$')
-axs[1].set_ylabel(r'$\ell(\ell+1)C_\ell/2\pi \, [\mu K^2]$')
-axs[1].set_title('Baseline Power Spectrum')
-axs[1].set_xlim([2, LMAX_PLOT])
-axs[1].set_ylim(ymin=0)
-axs[1].set_xscale('log')
-axs[1].legend()
-axs[1].grid(True, which="both", ls="-", alpha=0.5)
+    power_spectra_baseline = results_baseline.get_cmb_power_spectra(pars, CMB_unit=args.units, raw_cl=False)
+    cl_baseline_all = power_spectra_baseline['total']  # Shape: (lmax+1, 4) for TT, EE, BB, TE
 
-plt.tight_layout()
-# plt.savefig("cl_comparison_side_by_side.png")
-# print("Plot saved to cl_comparison_side_by_side.png")
+    lmax_calc = cl_baseline_all.shape[0] - 1
+    ls_calc = np.arange(lmax_calc + 1)
 
-plt.show()
+    print(f"Baseline C_l calculated up to LMAX={lmax_calc}.")
 
-print("--- Script Finished ---")
+    # Calculate UETC sources by summing modes
+    correlator_data = load_correlator_data(args)
+    actual_n_modes_to_sum = min(args.nmodes, correlator_data['nmodes_from_file'])
+
+    # Determine which modes are enabled
+    enabled_modes = []
+    if args.scalar:
+        enabled_modes.append('scalar')
+    if args.vector:
+        enabled_modes.append('vector')
+    if args.tensor:
+        enabled_modes.append('tensor')
+
+    print(f"Calculating UETC C_l by summing {actual_n_modes_to_sum} eigenmodes...")
+    print(f"Using {', '.join(enabled_modes)} mode(s)")
+
+    cl_strings_sum_all = np.zeros_like(cl_baseline_all)
+
+    for i_mode in range(1, actual_n_modes_to_sum + 1):
+        print(f"  Processing eigenmode {i_mode}/{actual_n_modes_to_sum}...")
+        pars.ActiveSources.set_active_eigenmode(i_mode)
+
+        results_mode_i = camb.get_results(pars)
+
+        power_spectra_mode_i = results_mode_i.get_cmb_power_spectra(pars, CMB_unit=args.units, raw_cl=False)
+
+        cl_mode_i_all = power_spectra_mode_i['total']  # Shape: (lmax+1, 4)
+
+        min_len = min(len(cl_strings_sum_all), len(cl_mode_i_all))
+        cl_strings_sum_all[:min_len] += cl_mode_i_all[:min_len]
+
+    pars.ActiveSources.set_active_eigenmode(0)
+    print("UETC C_l calculation finished.")
+
+    # Return all polarization components
+    return ls_calc, cl_baseline_all, cl_strings_sum_all
+
+def plot_results(ls_calc, cl_baseline_all, cl_strings_all, args):
+    """Plot the results for all polarization components"""
+    if args.no_plot:
+        return
+
+    print("Plotting results...")
+
+    # Use a more compatible matplotlib style
+    try:
+        plt.style.use('seaborn-v0_8-colorblind')
+    except:
+        try:
+            plt.style.use('seaborn-colorblind')
+        except:
+            pass  # Use default style if seaborn not available
+
+    # Create 4 rows x 2 columns subplot
+    fig, axs = plt.subplots(4, 2, figsize=(10, 10))
+
+    plot_mask = (ls_calc >= 1) & (ls_calc <= args.lmax)
+    ls_plot = ls_calc[plot_mask]
+
+    # Determine which modes are enabled for plot titles
+    enabled_modes = []
+    if args.scalar:
+        enabled_modes.append('Scalar')
+    if args.vector:
+        enabled_modes.append('Vector')
+    if args.tensor:
+        enabled_modes.append('Tensor')
+    mode_str = '+'.join(enabled_modes)
+
+    # Polarization components and their indices
+    pol_components = ['TT', 'EE', 'TE', 'BB']
+    pol_indices = [0, 1, 3, 2]
+
+    units_label = r'\mu K^2' if args.units == 'muK' else r'K^2'
+
+    # Plot each polarization component
+    for i, (pol_name, pol_idx) in enumerate(zip(pol_components, pol_indices)):
+        # Left column: Strings
+        cl_strings_pol = cl_strings_all[plot_mask, pol_idx]
+        axs[i, 0].plot(ls_plot, cl_strings_pol*(args.gmu)**2, label=f'Strings ({mode_str})', color='C1', linestyle='-')
+        axs[i, 0].set_xlabel(r'$\ell$')
+        axs[i, 0].set_ylabel(rf'$\ell(\ell+1)C_\ell^{{{pol_name}}}/2\pi \, [{units_label}]$')
+        #axs[i, 0].set_title(f'Strings {mode_str} Power Spectrum ({pol_name})')
+        axs[i, 0].set_xlim([2, args.lmax])
+        axs[i, 0].set_xscale('log')
+        # Set y-axis to log scale for EE and BB
+        if pol_name in ['EE', 'BB']:
+            axs[i, 0].set_yscale('log')
+        axs[i, 0].legend()
+        axs[i, 0].grid(True, which="both", ls="-", alpha=0.5)
+
+        # Right column: Baseline
+        cl_baseline_pol = cl_baseline_all[plot_mask, pol_idx]
+        axs[i, 1].plot(ls_plot, cl_baseline_pol, label=f'Baseline ({mode_str})', color='C0', linestyle='-')
+        axs[i, 1].set_xlabel(r'$\ell$')
+        axs[i, 1].set_ylabel(rf'$\ell(\ell+1)C_\ell^{{{pol_name}}}/2\pi \, [{units_label}]$')
+        #axs[i, 1].set_title(f'Baseline {mode_str} Power Spectrum ({pol_name})')
+        axs[i, 1].set_xlim([2, args.lmax])
+        # Set y-axis to log scale for EE and BB, linear for TT and TE
+        if pol_name in ['EE', 'BB']:
+            axs[i, 1].set_yscale('log')
+        else:
+            axs[i, 1].set_ylim(ymin=0)
+        axs[i, 1].set_xscale('log')
+        axs[i, 1].legend()
+        axs[i, 1].grid(True, which="both", ls="-", alpha=0.5)
+
+    plt.tight_layout()
+
+    if args.output:
+        plt.savefig(args.output)
+        print(f"Plot saved to {args.output}")
+    else:
+        plt.show()
+
+def main():
+    """Main function"""
+    args = parse_arguments()
+
+    # Determine which modes are enabled
+    enabled_modes = []
+    if args.scalar:
+        enabled_modes.append('scalar')
+    if args.vector:
+        enabled_modes.append('vector')
+    if args.tensor:
+        enabled_modes.append('tensor')
+
+    # Default to scalar if no modes specified
+    if not enabled_modes:
+        print("WARNING: No modes specified, defaulting to scalar mode")
+        args.scalar = True
+        enabled_modes = ['scalar']
+
+    print(f"Configuration:")
+    print(f"  Enabled modes: {', '.join(enabled_modes)}")
+    print(f"  Number of modes: {args.nmodes}")
+    print(f"  String tension: {args.gmu}")
+    print(f"  Max multipole: {args.lmax}")
+    print(f"  Units: {args.units}")
+    print()
+
+    print("Setting up CAMB parameters...")
+
+    # Setup CAMB parameters
+    pars = setup_camb_params(args)
+
+    # Load correlator data
+    correlator_data = load_correlator_data(args)
+
+    # Setup ActiveSources object
+    active_sources = setup_active_sources(correlator_data, args)
+    pars.ActiveSources = active_sources
+
+    # Calculate power spectra
+    ls_calc, cl_baseline_all, cl_strings_all = calculate_power_spectra(pars, args)
+
+    # Plot results
+    plot_results(ls_calc, cl_baseline_all, cl_strings_all, args)
+
+    print("--- Script Finished ---")
+
+if __name__ == "__main__":
+    main()
