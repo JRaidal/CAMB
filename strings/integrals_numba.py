@@ -345,33 +345,128 @@ def time_call(fn, *args, repeats=5):
     t1 = time.perf_counter()
     return (t1 - t0) / repeats * 1e3  # ms
 
+def time_call_random(fn, n_terms, n_samples=100, repeats=5):
+    """Time function calls with random x and rho values"""
+    # Generate random test cases
+    np.random.seed(42)  # For reproducible results
+    x_vals = np.random.uniform(1e-3, 10.0, n_samples)
+    rho_vals = np.random.uniform(1e-3, 10.0, n_samples)
+
+    t0 = time.perf_counter()
+    for _ in range(repeats):
+        for x, rho in zip(x_vals, rho_vals):
+            fn(x, rho, n_terms)
+    t1 = time.perf_counter()
+    return (t1 - t0) / repeats * 1e3  # ms
+
+def time_call_random_2arg(fn, n_samples=100, repeats=5):
+    """Time function calls with random x and rho values (for 2-arg functions)"""
+    # Generate random test cases
+    np.random.seed(42)  # For reproducible results
+    x_vals = np.random.uniform(1e-3, 10.0, n_samples)
+    rho_vals = np.random.uniform(1e-3, 10.0, n_samples)
+
+    t0 = time.perf_counter()
+    for _ in range(repeats):
+        for x, rho in zip(x_vals, rho_vals):
+            fn(x, rho)
+    t1 = time.perf_counter()
+    return (t1 - t0) / repeats * 1e3  # ms
+
 
 if __name__ == "__main__":
 
-    # I1
+    print("=== Performance Benchmarks with Random Parameters ===\n")
 
-    sizes = [100, 1_000, 10_000]
-    rows = []
-    for n in sizes:
-        rows.append({
-            "n_terms": n,
-            "plain ms": time_call(I1_int, 1.0, 1.0, n),
-            "numba ms": time_call(I1_int_numba, 1.0, 1.0, n),
-        })
+    # All integral benchmarks
+    print("Integral Performance Comparison (100 random samples):")
+    functions = [
+        ("I1", I1_int, I1_int_numba, True),    # True indicates needs n_terms
+        ("I2", I2_int, I2_int_numba, False),
+        ("I3", I3_int, I3_int_numba, False),
+        ("I4", I4_int, I4_int_numba, True),    # True indicates needs n_terms
+        ("I5", I5_int, I5_int_numba, False),
+        ("I6", I6_int, I6_int_numba, False),
+    ]
 
-    df = pd.DataFrame(rows)
+    # Test different n_terms values for functions that need them
+    n_terms_values = [100, 1_000, 10_000]
+
+    all_rows = []
+    for name, plain_fn, numba_fn, needs_n_terms in functions:
+        if needs_n_terms:
+            # Test different n_terms values
+            for n_terms in n_terms_values:
+                plain_time = time_call_random(plain_fn, n_terms=n_terms, n_samples=100, repeats=3)
+                numba_time = time_call_random(numba_fn, n_terms=n_terms, n_samples=100, repeats=3)
+                speedup = plain_time / numba_time if numba_time > 0 else float('inf')
+
+                all_rows.append({
+                    "function": f"{name}(n={n_terms})",
+                    "plain ms": f"{plain_time:.2f}",
+                    "numba ms": f"{numba_time:.2f}",
+                    "speedup": f"{speedup:.1f}x"
+                })
+        else:
+            # Functions that don't need n_terms
+            plain_time = time_call_random_2arg(plain_fn, n_samples=100, repeats=3)
+            numba_time = time_call_random_2arg(numba_fn, n_samples=100, repeats=3)
+            speedup = plain_time / numba_time if numba_time > 0 else float('inf')
+
+            all_rows.append({
+                "function": name,
+                "plain ms": f"{plain_time:.2f}",
+                "numba ms": f"{numba_time:.2f}",
+                "speedup": f"{speedup:.1f}x"
+            })
+
+    df = pd.DataFrame(all_rows)
     print(df)
+    print()
 
-    x_test = np.logspace(np.log10(1e-3), np.log10(1e1), 10)
+    # Accuracy comparison with random values for all functions
+    print("=== Accuracy Comparison (Random Samples) ===")
 
-    for i, x1 in enumerate(x_test):
-        for j, x2 in enumerate(x_test):
+    # Generate test cases with different scales
+    np.random.seed(123)
+    test_cases = []
 
-            rho = abs(x1 - x2)
-            slow_val = I1_int(x1, rho, n_terms=100)
-            fast_val = I1_int_numba(x1, rho, n_terms=100)
+    # Small values
+    test_cases.extend([(x, rho) for x, rho in zip(
+        np.random.uniform(1e-4, 1e-2, 5),
+        np.random.uniform(1e-4, 1e-2, 5)
+    )])
+
+    # Medium values
+    test_cases.extend([(x, rho) for x, rho in zip(
+        np.random.uniform(1e-2, 1.0, 5),
+        np.random.uniform(1e-2, 1.0, 5)
+    )])
+
+    # Large values
+    test_cases.extend([(x, rho) for x, rho in zip(
+        np.random.uniform(1.0, 10.0, 5),
+        np.random.uniform(1.0, 10.0, 5)
+    )])
+
+    for name, plain_fn, numba_fn, needs_n_terms in functions:
+        print(f"\nTesting {name} integral accuracy across parameter space:")
+        print(f"{'x':>10} {'rho':>10} {'plain':>12} {'numba':>12} {'abs_diff':>12} {'rel_diff':>12}")
+        print("-" * 70)
+
+        for x, rho in test_cases:
+            if needs_n_terms:
+                slow_val = plain_fn(x, rho, n_terms=100)
+                fast_val = numba_fn(x, rho, n_terms=100)
+            else:
+                slow_val = plain_fn(x, rho)
+                fast_val = numba_fn(x, rho)
 
             abs_diff = abs(slow_val - fast_val)
             rel_diff = abs_diff / abs(slow_val) if abs(slow_val) > 1e-15 else 0.0
 
-            print(f"{x1:10.2e} {x2:10.2e} {slow_val:12.6e} {fast_val:12.6e} {abs_diff:12.6e} {rel_diff:12.6e}")
+            print(f"{x:10.2e} {rho:10.2e} {slow_val:12.6e} {fast_val:12.6e} {abs_diff:12.6e} {rel_diff:12.6e}")
+
+    print("\n=== Summary ===")
+    print("Performance tests completed with random parameter sampling.")
+    print("This provides a more comprehensive view of performance across the parameter space.")
