@@ -338,19 +338,15 @@ def I6_int_numba(x, rho):
 # Benchmarking
 # --------------------------------------------------------------------
 
-def time_call(fn, *args, repeats=5):
-    t0 = time.perf_counter()
-    for _ in range(repeats):
-        fn(*args)
-    t1 = time.perf_counter()
-    return (t1 - t0) / repeats * 1e3  # ms
-
 def time_call_random(fn, n_terms, n_samples=100, repeats=5):
     """Time function calls with random x and rho values"""
-    # Generate random test cases
+    # Generate random test cases with log-uniform distribution
     np.random.seed(42)  # For reproducible results
-    x_vals = np.random.uniform(1e-3, 10.0, n_samples)
-    rho_vals = np.random.uniform(1e-3, 10.0, n_samples)
+    x_vals = np.logspace(np.log10(1e-4), np.log10(1e2), n_samples)
+    rho_vals = np.logspace(np.log10(1e-4), np.log10(1e2), n_samples)
+    # Shuffle to avoid correlation between x and rho
+    np.random.shuffle(x_vals)
+    np.random.shuffle(rho_vals)
 
     t0 = time.perf_counter()
     for _ in range(repeats):
@@ -361,10 +357,13 @@ def time_call_random(fn, n_terms, n_samples=100, repeats=5):
 
 def time_call_random_2arg(fn, n_samples=100, repeats=5):
     """Time function calls with random x and rho values (for 2-arg functions)"""
-    # Generate random test cases
+    # Generate random test cases with log-uniform distribution
     np.random.seed(42)  # For reproducible results
-    x_vals = np.random.uniform(1e-3, 10.0, n_samples)
-    rho_vals = np.random.uniform(1e-3, 10.0, n_samples)
+    x_vals = np.logspace(np.log10(1e-4), np.log10(1e2), n_samples)
+    rho_vals = np.logspace(np.log10(1e-4), np.log10(1e2), n_samples)
+    # Shuffle to avoid correlation between x and rho
+    np.random.shuffle(x_vals)
+    np.random.shuffle(rho_vals)
 
     t0 = time.perf_counter()
     for _ in range(repeats):
@@ -427,27 +426,15 @@ if __name__ == "__main__":
     # Accuracy comparison with random values for all functions
     print("=== Accuracy Comparison (Random Samples) ===")
 
-    # Generate test cases with different scales
+        # Generate test cases with log-uniform distribution
     np.random.seed(123)
-    test_cases = []
-
-    # Small values
-    test_cases.extend([(x, rho) for x, rho in zip(
-        np.random.uniform(1e-4, 1e-2, 5),
-        np.random.uniform(1e-4, 1e-2, 5)
-    )])
-
-    # Medium values
-    test_cases.extend([(x, rho) for x, rho in zip(
-        np.random.uniform(1e-2, 1.0, 5),
-        np.random.uniform(1e-2, 1.0, 5)
-    )])
-
-    # Large values
-    test_cases.extend([(x, rho) for x, rho in zip(
-        np.random.uniform(1.0, 10.0, 5),
-        np.random.uniform(1.0, 10.0, 5)
-    )])
+    n_test_cases = 15
+    x_vals = np.logspace(np.log10(1e-4), np.log10(1e2), n_test_cases)
+    rho_vals = np.logspace(np.log10(1e-4), np.log10(1e2), n_test_cases)
+    # Shuffle to avoid correlation between x and rho
+    np.random.shuffle(x_vals)
+    np.random.shuffle(rho_vals)
+    test_cases = list(zip(x_vals, rho_vals))
 
     for name, plain_fn, numba_fn, needs_n_terms in functions:
         print(f"\nTesting {name} integral accuracy across parameter space:")
