@@ -1,9 +1,116 @@
+"""
+This is a Python implementation of the I1, I2, I3, I4, I5, and I6 integrals.
+
+The original Fortran code versions are:
+
+!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  function spher_bessel(n,x)
+    implicit none
+    real(DP) spher_bessel
+    real(DP) x
+    integer n
+    real(DP), parameter :: pi = 3.1415926535897932384626433832795d0
+    COMPLEX (KIND=nag_wp)           :: z,cy(1)
+    REAL (KIND=nag_wp)              :: fnu
+    INTEGER                         :: nz,ifail
+    CHARACTER (1)                   :: scal
+    if (n.eq.-1) then
+        spher_bessel=cos(x)/x
+       return
+    end if
+    fnu=0.5d0+n
+    z = dcmplx(x,0.0d0)
+    scal='u'
+    ifail=0
+    CALL s17def(fnu,z,1,scal,cy,nz,ifail)
+    if (ifail.ne.0) stop
+    spher_bessel=sqrt(pi/(2.0d0*x))*dreal(cy(1))
+  end function spher_bessel
+!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  function factorial(n)
+    implicit none
+    real(DP) factorial,x
+    integer n,ifail
+    x=1.0d0+n
+    factorial = s14aaf(x,ifail)
+    if (ifail.ne.0) stop
+  end function factorial
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  function I1_int(x,rho,n)
+    implicit none
+    real(DP) I1_int
+    real(DP) x,rho,term
+    integer i,n
+    I1_int = 0.0d0
+    do i=1,n
+       term = 1.0d0/factorial(i)*(rho/(2.0d0*i-1.0d0))*(-x**2/(2.0d0*rho))**i*spher_bessel(i-1,rho)
+       I1_int = I1_int + term
+    end do
+  end function I1_int
+!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ function I2_int(x,rho)
+    implicit none
+    real(DP) I2_int
+    real(DP) x,rho,px,rpx,srpx
+    px = rho**2+x**2
+    rpx = sqrt(px)
+    srpx = sin(rpx)
+    I2_int = srpx/rpx
+  end function I2_int
+!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ function I3_int(x,rho)
+    implicit none
+    real(DP) I3_int
+    real(DP) x,rho,px,rpx,srpx,crpx
+    px = rho**2+x**2
+    rpx = sqrt(px)
+    srpx = sin(rpx)
+    crpx = cos(rpx)
+    I3_int = crpx/px*(1.0d0-3.0d0*x**2/px)+srpx/rpx*(1.0d0-(1.0d0+x**2)/px+3.0d0*x**2/px**2)
+  end function I3_int
+ !~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  function I4_int(x,rho,n)
+    implicit none
+    real(DP) I4_int
+    real(DP) x,rho,term
+    integer i,n
+    I4_int = cos(x)/rho**2
+    do i=1,n
+       term = - 1.0d0/factorial(i)*(1.0d0/(2.0d0*i-1.0d0))*(-x**2/(2.0d0*rho))**i*spher_bessel(i-2,rho)
+       I4_int = I4_int + term
+    end do
+  end function I4_int
+!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ function I5_int(x,rho)
+    implicit none
+    real(DP) I5_int
+    real(DP) x,rho,px,rpx,srpx,crpx
+    px = rho**2+x**2
+    rpx = sqrt(px)
+    crpx = cos(rpx)
+    I5_int = (cos(x)-crpx)/rho**2
+end function I5_int
+!~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ function I6_int(x,rho)
+    implicit none
+    real(DP) I6_int
+    real(DP) x,rho,px,rpx,srpx,crpx
+    px = rho**2+x**2
+    rpx = sqrt(px)
+    srpx = sin(rpx)
+    crpx = cos(rpx)
+    I6_int = (srpx/rpx-crpx)/px
+end function I6_int
+"""
+
 import time
 import math
+from typing import Tuple
+
 import numpy as np
-from numba import njit, float64, int32
-import scipy.special as sp
 import pandas as pd
+import scipy.special as sp
+from numba import njit, float64, int32
 
 # --------------------------------------------------------------------
 # Original pure‑Python/SciPy helper
@@ -26,9 +133,11 @@ def spher_bessel(n, x):
     else: result = np.zeros_like(x, dtype=float)
     return np.nan_to_num(result, nan=0.0, posinf=1e10, neginf=-1e10)
 
+
 def factorial(n):
     try: return sp.gamma(n + 1.0)
     except ValueError: return np.inf
+
 
 def I1_int(x, rho, n_terms):
     val = 0.0; rho_safe = max(rho, 1e-12); x2_safe = max(x**2, 1e-12)
@@ -47,10 +156,12 @@ def I1_int(x, rho, n_terms):
         val = new_val
     return np.nan_to_num(val)
 
+
 def I2_int(x, rho):
     px = rho**2 + x**2;
     if px < 1e-12: return 1.0
     rpx = np.sqrt(px); srpx = np.sin(rpx); return np.divide(srpx, rpx, out=np.ones_like(srpx), where=rpx!=0)
+
 
 def I3_int(x, rho):
     px = rho**2 + x**2;
@@ -60,6 +171,7 @@ def I3_int(x, rho):
     term1 = np.divide(crpx * term1_factor, px, out=np.zeros_like(px), where=px!=0)
     term2 = np.divide(srpx * term2_factor, rpx, out=np.zeros_like(rpx), where=rpx!=0)
     val = term1 + term2; return np.nan_to_num(val, nan=-1/3.0, posinf=0.0, neginf=0.0)
+
 
 def I4_int(x, rho, n_terms):
     rho_safe = max(rho, 1e-12);
@@ -82,12 +194,14 @@ def I4_int(x, rho, n_terms):
         val = new_val
     return np.nan_to_num(val)
 
+
 def I5_int(x, rho):
     rho_safe = max(rho, 1e-12); px = rho_safe**2 + x**2
     if rho_safe**2 < 1e-15 * x**2 and abs(x) > 1e-6: return np.divide(np.sin(x), 2.0*x, out=np.full_like(x, -0.5), where=x!=0)
     elif px < 1e-12: return -0.5
     rpx = np.sqrt(px); crpx = np.cos(rpx); val = (np.cos(x) - crpx) / rho_safe**2
     return np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
+
 
 def I6_int(x, rho):
     px = rho**2 + x**2;
@@ -97,10 +211,12 @@ def I6_int(x, rho):
     val = np.divide(term1 - crpx, px, out=np.full_like(px, 1/3.0), where=px!=0)
     return np.nan_to_num(val, nan=1/3.0, posinf=0.0, neginf=0.0)
 
+
 #Integral approximations
 def I1_int_a(x, rho):
     if rho == 0: return np.pi * x / 2.0
     j0_rho = sp.jv(0, rho); return (np.pi * x / 2.0) * j0_rho
+
 
 def I4_int_a(x, rho):
     if rho == 0: return np.pi*x/4.0
@@ -111,19 +227,51 @@ def I4_int_a(x, rho):
 # Numerically stable implementation of integrals with Numba
 # --------------------------------------------------------------------
 
+SMALL_RHO_LIMIT_NUMBA = 0.01                      # triggers analytic branch
+
+@njit(cache=True, fastmath=True)
+def _safe_downward_j(max_l: int, rho: float) -> np.ndarray:
+    """
+    Down‑ward recursion for spherical‑Bessel values with automatic
+    rescaling so that |j| never exceeds 1e150 (prevents overflow that
+    would later turn into NaNs when multiplied by zero).
+    """
+    j = np.empty(max_l + 2, dtype=np.float64)
+    j[max_l + 1] = 0.0
+    j[max_l]     = 1.0
+
+    for l in range(max_l, 0, -1):
+        j_prev = ((2.0 * l + 1.0) / rho) * j[l] - j[l + 1]
+
+        if abs(j_prev) > 1.0e150:     # rescale entire array by 1e‑150
+            j *= 1.0e-150
+            j_prev = ((2.0 * l + 1.0) / rho) * j[l] - j[l + 1]
+
+        j[l - 1] = j_prev
+    return j
+
+
+@njit(cache=True, fastmath=True)
+def _next_power_term(pt: float, base: float, i: int) -> Tuple[float, bool]:
+    """
+    Safe update  pt ← pt * base .  If that multiplication would overflow
+    IEEE 754 double precision (≈ 1e308) the function returns the *old*
+    pt and an overflow flag so that the outer summation can terminate.
+    """
+    if base == 0.0:
+        return 0.0, False
+
+    LOG_LIMIT = 700.0                       # slightly below ln(1e308)
+    ln_base   = math.log(abs(base))
+
+    if i * ln_base > LOG_LIMIT:
+        return pt, True                     # signal overflow to caller
+
+    return pt * base, False
+
+
 @njit(float64(float64, float64, int32), fastmath=True, cache=True)
 def I1_int_numba(x, rho, n_terms):
-    """
-    Stable evaluation of the I1 integral series.
-
-    Strategy
-    --------
-    * For moderate / large rho  (>= 1e‑3) we build all needed spherical‑Bessel
-      values j_ℓ(ρ) using **downward recursion**, which is numerically stable.
-    * For tiny rho  (< 1e‑3) the downward scheme overflows, so we switch to an
-      analytic small‑z expansion where j_ℓ(ρ) ≈ ρ^ℓ / (2ℓ+1)!!  (leading term).
-    """
-    # Safeguards
     if rho < 1e-12:
         rho = 1e-12
     x2 = x * x
@@ -131,59 +279,59 @@ def I1_int_numba(x, rho, n_terms):
         x2 = 1e-12
     base = -x2 / (2.0 * rho)
 
-    # --- small‑rho branch ----------------------------------------------------
-    if rho < 1e-3:
-        fact_inv = 1.0
+    # ---------- analytic small‑ρ branch ----------
+    if rho < SMALL_RHO_LIMIT_NUMBA:
+        fact_inv   = 1.0
         power_term = 1.0
-        val = 0.0
-        # leading‑order: j_0 ≈ 1, j_ℓ (ℓ>0) ≈ ρ^ℓ / (2ℓ+1)!!
+        val        = 0.0
+        overflow   = False
+
         for i in range(1, n_terms + 1):
-            fact_inv /= i          # 1/i!
-            power_term *= base     # base^i
-            # compute leading‑order j_{i‑1}
+            fact_inv /= i
+            power_term, overflow = _next_power_term(power_term, base, i)
+            if overflow:
+                break
+
+            # leading‑order j_{i‑1}
             l = i - 1
             if l == 0:
-                j = 1.0
+                j_leading = 1.0
             else:
-                # double factorial (2l+1)!!
-                df = 1.0
+                dbl_fact = 1.0
                 k = 2 * l + 1
                 while k > 1:
-                    df *= k
+                    dbl_fact *= k
                     k -= 2
-                j = (rho ** l) / df
-            term = fact_inv * (rho / (2.0 * i - 1.0)) * power_term * j
+                j_leading = (rho ** l) / dbl_fact
+
+            term = fact_inv * (rho / (2.0 * i - 1.0)) * power_term * j_leading
             val += term
             if abs(term) < 1e-15 * abs(val):
                 break
         return val
 
-    # --- regular (downward‑recursion) branch --------------------------------
-    max_l = n_terms - 1
-    j = np.zeros(max_l + 2, dtype=np.float64)
-    j[max_l + 1] = 0.0
-    j[max_l] = 1.0
-    # Downward recursion: j_{ℓ-1} = ((2ℓ+1)/ρ) j_ℓ − j_{ℓ+1}
-    for l in range(max_l, 0, -1):
-        j[l - 1] = ((2.0 * l + 1.0) / rho) * j[l] - j[l + 1]
-    # Scale so that j_0 matches the analytic value sin(ρ)/ρ
-    j0_exact = math.sin(rho) / rho
-    scale = j0_exact / j[0] if j[0] != 0.0 else 0.0
-    for idx in range(max_l + 1):
+    # ---------- downward‑recursion branch ----------
+    j = _safe_downward_j(n_terms - 1, rho)
+    scale = (math.sin(rho) / rho) / j[0] if j[0] != 0.0 else 0.0
+    for idx in range(n_terms):
         j[idx] *= scale
 
-    # Accumulate the series
-    fact_inv = 1.0
+    fact_inv   = 1.0
     power_term = 1.0
-    val = 0.0
+    val        = 0.0
+    overflow   = False
+
     for i in range(1, n_terms + 1):
         fact_inv /= i
-        power_term *= base
+        power_term, overflow = _next_power_term(power_term, base, i)
+        if overflow:
+            break
         term = fact_inv * (rho / (2.0 * i - 1.0)) * power_term * j[i - 1]
         val += term
         if abs(term) < 1e-15 * abs(val):
             break
     return val
+
 
 @njit(float64(float64, float64), fastmath=True, cache=True)
 def I2_int_numba(x, rho):
@@ -193,30 +341,25 @@ def I2_int_numba(x, rho):
     rpx = math.sqrt(px)
     return math.sin(rpx) / rpx
 
+
 @njit(float64(float64, float64), fastmath=True, cache=True)
 def I3_int_numba(x, rho):
     px = rho * rho + x * x
-    if px < 1e-12:                 # original small‑argument guard
-        return -1.0 / 3.0          # analytic limit
+    if px < 1e-12:
+        return -1.0 / 3.0
 
     rpx   = math.sqrt(px)
     srpx  = math.sin(rpx)
     crpx  = math.cos(rpx)
+    inv_px = 1.0 / px
 
-    inv_px      = 1.0 / px
-    x2_over_px  = x * x * inv_px
-    inv_px2     = inv_px * inv_px  # (1/px)²
-
-    term1_factor = 1.0 - 3.0 * x2_over_px
-    term2_factor = 1.0 - (1.0 + x * x) * inv_px + 3.0 * x * x * inv_px2
-
-    term1 = crpx * term1_factor * inv_px               # (cos · …) / px
-    term2 = srpx * term2_factor / rpx                  # (sin · …) / √px
-
-    val = term1 + term2
-    if not math.isfinite(val):                         # keep policy of np.nan_to_num
+    term1 = crpx * (1.0 - 3.0 * x * x * inv_px) * inv_px
+    term2 = srpx / rpx * (1.0 - (1.0 + x * x) * inv_px + 3.0 * x * x * inv_px * inv_px)
+    val   = term1 + term2
+    if not math.isfinite(val):
         return -1.0 / 3.0
     return val
+
 
 @njit(float64(float64, float64, int32), fastmath=True, cache=True)
 def I4_int_numba(x, rho, n_terms):
@@ -226,18 +369,22 @@ def I4_int_numba(x, rho, n_terms):
     if x2 < 1e-12:
         x2 = 1e-12
     base = -x2 / (2.0 * rho)
+
     val = math.cos(x) / (rho * rho)
 
-    # small rho branch
-    if rho < 1e-3:
-        fact_inv = 1.0
+    # -------- analytic small‑ρ branch --------
+    if rho < SMALL_RHO_LIMIT_NUMBA:
+        fact_inv   = 1.0
         power_term = 1.0
-        j_neg1 = 1.0 / rho
+        overflow   = False
+        j_neg1     = math.cos(rho) / rho   # leading term for j_{‑1}
+
         for i in range(1, n_terms + 1):
             fact_inv /= i
-            power_term *= base
+            power_term, overflow = _next_power_term(power_term, base, i)
+            if overflow:
+                break
 
-            # compute j_{i-2} leading term
             if i == 1:
                 j_val = j_neg1
             else:
@@ -253,83 +400,64 @@ def I4_int_numba(x, rho, n_terms):
                     j_val = (rho ** l) / dbl_fact
 
             term = -fact_inv * (1.0 / (2.0 * i - 1.0)) * power_term * j_val
-            if not math.isfinite(term):
-                break
             val += term
             if abs(term) < 1e-15 * abs(val):
                 break
         return val
 
-    # downward recursion branch
-    max_l = n_terms
-    j = np.zeros(max_l + 2, dtype=np.float64)
-    j[max_l + 1] = 0.0
-    j[max_l] = 1.0
-    for l in range(max_l, 0, -1):
-        j[l - 1] = ((2.0 * l + 1.0) / rho) * j[l] - j[l + 1]
+    # -------- downward‑recursion branch --------
+    j = _safe_downward_j(n_terms, rho)
     scale = (math.sin(rho) / rho) / j[0] if j[0] != 0.0 else 0.0
-    for idx in range(max_l + 1):
+    for idx in range(n_terms + 1):
         j[idx] *= scale
     j_neg1 = math.cos(rho) / rho
 
-    fact_inv = 1.0
+    fact_inv   = 1.0
     power_term = 1.0
+    overflow   = False
+
     for i in range(1, n_terms + 1):
         fact_inv /= i
-        power_term *= base
-        j_val = j_neg1 if i == 1 else j[i - 2]
-        term = -fact_inv * (1.0 / (2.0 * i - 1.0)) * power_term * j_val
-        if not math.isfinite(term):
+        power_term, overflow = _next_power_term(power_term, base, i)
+        if overflow:
             break
-        val += term
+        j_val = j_neg1 if i == 1 else j[i - 2]
+        term  = -fact_inv * (1.0 / (2.0 * i - 1.0)) * power_term * j_val
+        val  += term
         if abs(term) < 1e-15 * abs(val):
             break
     return val
 
+
 @njit(float64(float64, float64), fastmath=True, cache=True)
 def I5_int_numba(x, rho):
-    # guard against exact zero
     rho_safe = rho if rho > 1e-12 else 1e-12
-
-    # px = ρ² + x²
     px = rho_safe * rho_safe + x * x
 
-    # ---- small‑parameter branches -----------------------------------------
     if rho_safe * rho_safe < 1e-15 * x * x and abs(x) > 1e-6:
         if x != 0.0:
             return math.sin(x) / (2.0 * x)
-        else:
-            return -0.5
-
+        return -0.5
     if px < 1e-12:
         return -0.5
 
-    # ---- main expression ---------------------------------------------------
     rpx  = math.sqrt(px)
     crpx = math.cos(rpx)
-
-    val = (math.cos(x) - crpx) / (rho_safe * rho_safe)
-
-    # replicate np.nan_to_num behaviour
+    val  = (math.cos(x) - crpx) / (rho_safe * rho_safe)
     if not math.isfinite(val):
         return 0.0
     return val
 
+
 @njit(float64(float64, float64), fastmath=True, cache=True)
 def I6_int_numba(x, rho):
     px = rho * rho + x * x
-    if px < 1e-12:                     # small‑argument limit
+    if px < 1e-12:
         return 1.0 / 3.0
-
     rpx  = math.sqrt(px)
     srpx = math.sin(rpx)
     crpx = math.cos(rpx)
-
-    # sin(√px)/√px  guard (√px never zero here, px ≥ 1e‑12)
-    term1 = srpx / rpx
-    val   = (term1 - crpx) / px
-
-    # replicate np.nan_to_num guard behaviour
+    val  = (srpx / rpx - crpx) / px
     if not math.isfinite(val):
         return 1.0 / 3.0
     return val
@@ -354,6 +482,7 @@ def time_call_random(fn, n_terms, n_samples=100, repeats=5):
             fn(x, rho, n_terms)
     t1 = time.perf_counter()
     return (t1 - t0) / repeats * 1e3  # ms
+
 
 def time_call_random_2arg(fn, n_samples=100, repeats=5):
     """Time function calls with random x and rho values (for 2-arg functions)"""
