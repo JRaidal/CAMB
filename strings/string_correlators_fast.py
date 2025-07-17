@@ -348,4 +348,3 @@ if __name__ == "__main__":
     t0 = time.time()
     build_table()
     print(f"Total wall time: {time.time()-t0:.1f} s")
-
