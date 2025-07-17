@@ -116,7 +116,7 @@ def setup_camb_params(args):
     pars = camb.CAMBparams()
 
     # Have turned off massive neutrinos to avoid issues with the vector modes
-    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.0, omk=0, tau=0.06)
+    pars.set_cosmology(H0=67.5, ombh2=0.022, omch2=0.122, mnu=0.06, omk=0, tau=0.06)
 
     # Set maximum l values for different modes
     if args.tensor:

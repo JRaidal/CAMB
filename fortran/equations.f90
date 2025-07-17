@@ -50,8 +50,7 @@
 
     logical :: DoTensorNeutrinos = .true.
 
-!     logical, parameter :: second_order_tightcoupling = .true.
-    logical, parameter :: second_order_tightcoupling = .false.
+    logical, parameter :: second_order_tightcoupling = .true.
 
 
     real(dl) :: Magnetic = 0._dl
@@ -732,6 +731,9 @@
     if (CP%Evolve_delta_Ts) then
         yout(EVOut%Ts_ix) = y(EV%Ts_ix)
     end if
+
+    ! Active sources
+    yout(EVout%s_ix) = y(EV%s_ix)
 
     end subroutine CopyScalarVariableArray
 
