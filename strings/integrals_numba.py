@@ -272,11 +272,8 @@ def _next_power_term(pt: float, base: float, i: int) -> Tuple[float, bool]:
 
 @njit(float64(float64, float64, int32), fastmath=True, cache=True)
 def I1_int_numba(x, rho, n_terms):
-    if rho < 1e-12:
-        rho = 1e-12
+    rho = max(rho, 1e-12)
     x2 = x * x
-    if x2 < 1e-12:
-        x2 = 1e-12
     base = -x2 / (2.0 * rho)
 
     # ---------- analytic small‑ρ branch ----------
@@ -346,7 +343,7 @@ def I2_int_numba(x, rho):
 def I3_int_numba(x, rho):
     px = rho * rho + x * x
     if px < 1e-12:
-        return -1.0 / 3.0
+        return 2.0 / 3.0
 
     rpx   = math.sqrt(px)
     srpx  = math.sin(rpx)
@@ -355,19 +352,13 @@ def I3_int_numba(x, rho):
 
     term1 = crpx * (1.0 - 3.0 * x * x * inv_px) * inv_px
     term2 = srpx / rpx * (1.0 - (1.0 + x * x) * inv_px + 3.0 * x * x * inv_px * inv_px)
-    val   = term1 + term2
-    if not math.isfinite(val):
-        return -1.0 / 3.0
-    return val
+    return term1 + term2
 
 
 @njit(float64(float64, float64, int32), fastmath=True, cache=True)
 def I4_int_numba(x, rho, n_terms):
-    if rho < 1e-12:
-        rho = 1e-12
+    rho = max(rho, 1e-12)
     x2 = x * x
-    if x2 < 1e-12:
-        x2 = 1e-12
     base = -x2 / (2.0 * rho)
 
     val = math.cos(x) / (rho * rho)
@@ -431,22 +422,21 @@ def I4_int_numba(x, rho, n_terms):
 
 @njit(float64(float64, float64), fastmath=True, cache=True)
 def I5_int_numba(x, rho):
-    rho_safe = rho if rho > 1e-12 else 1e-12
-    px = rho_safe * rho_safe + x * x
-
-    if rho_safe * rho_safe < 1e-15 * x * x and abs(x) > 1e-6:
-        if x != 0.0:
-            return math.sin(x) / (2.0 * x)
-        return -0.5
+    px = rho * rho + x * x
     if px < 1e-12:
-        return -0.5
-
-    rpx  = math.sqrt(px)
-    crpx = math.cos(rpx)
-    val  = (math.cos(x) - crpx) / (rho_safe * rho_safe)
-    if not math.isfinite(val):
-        return 0.0
-    return val
+        return 0.5
+    rpx = math.sqrt(px)
+    w = (x + rpx) / 2.0
+    z = (rpx - x) / 2.0
+    if w == 0.0:
+        sinc_w = 1.0
+    else:
+        sinc_w = math.sin(w) / w
+    if z == 0.0:
+        sinc_z = 1.0
+    else:
+        sinc_z = math.sin(z) / z
+    return 0.5 * sinc_w * sinc_z
 
 
 @njit(float64(float64, float64), fastmath=True, cache=True)
@@ -457,10 +447,7 @@ def I6_int_numba(x, rho):
     rpx  = math.sqrt(px)
     srpx = math.sin(rpx)
     crpx = math.cos(rpx)
-    val  = (srpx / rpx - crpx) / px
-    if not math.isfinite(val):
-        return 1.0 / 3.0
-    return val
+    return (srpx / rpx - crpx) / px
 
 # --------------------------------------------------------------------
 # Benchmarking
@@ -557,7 +544,7 @@ if __name__ == "__main__":
 
         # Generate test cases with log-uniform distribution
     np.random.seed(123)
-    n_test_cases = 15
+    n_test_cases = 100
     x_vals = np.logspace(np.log10(1e-4), np.log10(1e2), n_test_cases)
     rho_vals = np.logspace(np.log10(1e-4), np.log10(1e2), n_test_cases)
     # Shuffle to avoid correlation between x and rho
@@ -565,15 +552,20 @@ if __name__ == "__main__":
     np.random.shuffle(rho_vals)
     test_cases = list(zip(x_vals, rho_vals))
 
+        # Accuracy comparison with summary metrics
+    rel_diff_threshold = 1e-8  # Only show cases above this threshold
+
     for name, plain_fn, numba_fn, needs_n_terms in functions:
-        print(f"\nTesting {name} integral accuracy across parameter space:")
-        print(f"{'x':>10} {'rho':>10} {'plain':>12} {'numba':>12} {'abs_diff':>12} {'rel_diff':>12}")
-        print("-" * 70)
+        print(f"\nTesting {name} integral accuracy:")
+
+        rel_diffs = []
+        abs_diffs = []
+        problem_cases = []
 
         for x, rho in test_cases:
             if needs_n_terms:
-                slow_val = plain_fn(x, rho, n_terms=100)
-                fast_val = numba_fn(x, rho, n_terms=100)
+                slow_val = plain_fn(x, rho, n_terms=1000)
+                fast_val = numba_fn(x, rho, n_terms=1000)
             else:
                 slow_val = plain_fn(x, rho)
                 fast_val = numba_fn(x, rho)
@@ -581,7 +573,31 @@ if __name__ == "__main__":
             abs_diff = abs(slow_val - fast_val)
             rel_diff = abs_diff / abs(slow_val) if abs(slow_val) > 1e-15 else 0.0
 
-            print(f"{x:10.2e} {rho:10.2e} {slow_val:12.6e} {fast_val:12.6e} {abs_diff:12.6e} {rel_diff:12.6e}")
+            rel_diffs.append(rel_diff)
+            abs_diffs.append(abs_diff)
+
+            # Only store cases above threshold
+            if rel_diff > rel_diff_threshold:
+                problem_cases.append((x, rho, slow_val, fast_val, abs_diff, rel_diff))
+
+        # Summary statistics
+        rel_diffs = np.array(rel_diffs)
+        abs_diffs = np.array(abs_diffs)
+
+        print(f"  Summary: {len(test_cases)} test cases")
+        print(f"  Max relative error: {np.max(rel_diffs):.2e}")
+        print(f"  Mean relative error: {np.mean(rel_diffs):.2e}")
+        print(f"  Cases above threshold ({rel_diff_threshold:.0e}): {len(problem_cases)}")
+
+        # Show problem cases if any
+        if problem_cases:
+            print(f"  Problem cases (rel_diff > {rel_diff_threshold:.0e}):")
+            print(f"  {'x':>10} {'rho':>10} {'plain':>12} {'numba':>12} {'abs_diff':>12} {'rel_diff':>12}")
+            print("  " + "-" * 68)
+            for x, rho, slow_val, fast_val, abs_diff, rel_diff in problem_cases:
+                print(f"  {x:10.2e} {rho:10.2e} {slow_val:12.6e} {fast_val:12.6e} {abs_diff:12.6e} {rel_diff:12.6e}")
+        else:
+            print(f"  ✓ All cases within tolerance")
 
     print("\n=== Summary ===")
     print("Performance tests completed with random parameter sampling.")
