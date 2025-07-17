@@ -1,0 +1,59 @@
+=== PROFILING RESULTS ===
+         249888 function calls in 0.104 seconds
+
+   Ordered by: cumulative time
+   List reduced from 142 to 50 due to restriction <50>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.104    0.104 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:780(calculate_eigenvectors)
+        1    0.003    0.003    0.100    0.100 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:525(get_correlators_vectorized)
+      308    0.007    0.000    0.035    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:284(I1_int)
+     1959    0.000    0.000    0.030    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:73(spher_bessel_cached)
+     1959    0.007    0.000    0.030    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:243(spher_bessel)
+     4449    0.014    0.000    0.028    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/lib/type_check.py:403(nan_to_num)
+     2660    0.001    0.000    0.021    0.000 /opt/anaconda3/lib/python3.12/site-packages/scipy/interpolate/_polyint.py:59(__call__)
+     2660    0.001    0.000    0.014    0.000 /opt/anaconda3/lib/python3.12/site-packages/scipy/interpolate/_interpolate.py:759(_evaluate)
+     2660    0.009    0.000    0.013    0.000 /opt/anaconda3/lib/python3.12/site-packages/scipy/interpolate/_interpolate.py:690(_call_linear)
+      782    0.003    0.000    0.010    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:306(I3_int)
+      782    0.003    0.000    0.010    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:343(I6_int)
+      308    0.006    0.000    0.009    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:315(I4_int)
+      137    0.002    0.000    0.008    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:377(get_correlators)
+     3921    0.001    0.000    0.007    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/fromnumeric.py:2322(any)
+      782    0.001    0.000    0.006    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:336(I5_int)
+     3922    0.002    0.000    0.006    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/fromnumeric.py:71(_wrapreduction)
+     2660    0.001    0.000    0.006    0.000 /opt/anaconda3/lib/python3.12/site-packages/scipy/interpolate/_polyint.py:90(_prepare_x)
+     2663    0.002    0.000    0.005    0.000 /opt/anaconda3/lib/python3.12/site-packages/scipy/_lib/_util.py:275(_asarray_validated)
+     4449    0.005    0.000    0.005    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/lib/ufunclike.py:71(isposinf)
+     4449    0.002    0.000    0.004    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/lib/type_check.py:393(_getmaxmin)
+        1    0.000    0.000    0.004    0.004 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:722(diagonalize_correlators)
+        3    0.000    0.000    0.004    0.001 /opt/anaconda3/lib/python3.12/site-packages/scipy/_lib/deprecation.py:209(inner_f)
+        3    0.001    0.000    0.004    0.001 /opt/anaconda3/lib/python3.12/site-packages/scipy/linalg/_decomp.py:271(eigh)
+     3918    0.001    0.000    0.004    0.000 {method 'any' of 'numpy.generic' objects}
+     3523    0.003    0.000    0.003    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/numeric.py:67(zeros_like)
+     4449    0.003    0.000    0.003    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/lib/ufunclike.py:142(isneginf)
+     3918    0.000    0.000    0.002    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/_methods.py:55(_any)
+      782    0.002    0.000    0.002    0.000 /Users/adammoss/work/code/strings/CAMB/strings/string_correlators.py:301(I2_int)
+        3    0.002    0.001    0.002    0.001 /opt/anaconda3/lib/python3.12/site-packages/scipy/linalg/lapack.py:982(_compute_lwork)
+     2660    0.000    0.000    0.002    0.000 {method 'clip' of 'numpy.ndarray' objects}
+     3925    0.002    0.000    0.002    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+     2660    0.000    0.000    0.002    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/fromnumeric.py:1332(searchsorted)
+     2660    0.001    0.000    0.002    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/numerictypes.py:357(issubdtype)
+     2660    0.002    0.000    0.002    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/_methods.py:90(_clip)
+     1564    0.001    0.000    0.002    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/numeric.py:203(ones_like)
+     1805    0.001    0.000    0.002    0.000 /opt/anaconda3/lib/python3.12/site-packages/scipy/special/_spherical_bessel.py:6(spherical_jn)
+     4449    0.001    0.000    0.001    0.000 <frozen importlib._bootstrap>:1390(_handle_fromlist)
+     2660    0.000    0.000    0.001    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/fromnumeric.py:53(_wrapfunc)
+     6552    0.001    0.000    0.001    0.000 {built-in method numpy.array}
+     5320    0.001    0.000    0.001    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/numerictypes.py:283(issubclass_)
+    16881    0.001    0.000    0.001    0.000 {built-in method builtins.issubclass}
+     9089    0.001    0.000    0.001    0.000 {built-in method numpy.asarray}
+     4449    0.001    0.000    0.001    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/getlimits.py:484(__new__)
+     2660    0.001    0.000    0.001    0.000 {method 'searchsorted' of 'numpy.ndarray' objects}
+    19217    0.001    0.000    0.001    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/multiarray.py:1080(copyto)
+      782    0.001    0.000    0.001    0.000 /opt/anaconda3/lib/python3.12/site-packages/numpy/core/numeric.py:341(full_like)
+    14658    0.001    0.000    0.001    0.000 {built-in method builtins.abs}
+     2660    0.000    0.000    0.001    0.000 /opt/anaconda3/lib/python3.12/site-packages/scipy/interpolate/_polyint.py:96(_finish_y)
+     2664    0.001    0.000    0.001    0.000 {method 'astype' of 'numpy.ndarray' objects}
+     9784    0.000    0.000    0.000    0.000 {built-in method builtins.isinstance}
+
+

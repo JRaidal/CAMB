@@ -1,0 +1,89 @@
+STRING CORRELATORS PERFORMANCE REPORT
+==================================================
+
+Generated on: 2025-07-17 10:53:18
+Python version: 3.12.7 | packaged by Anaconda, Inc. | (main, Oct  4 2024, 08:22:19) [Clang 14.0.6 ]
+NumPy version: 1.26.4
+
+
+=== Profiling individual functions ===
+
+--- Profiling get_correlators (100 calls) ---
+Total time: 0.0106s
+Average per call: 0.000106s
+Calls per second: 9419
+
+--- Profiling spher_bessel (10000 calls) ---
+Total time: 0.1317s
+Average per call: 0.000013s
+Calls per second: 75951
+
+--- Profiling I1_int (1000 calls) ---
+Total time: 0.0878s
+Average per call: 0.000088s
+Calls per second: 11389
+
+--- Profiling I2_int (1000 calls) ---
+Total time: 0.0076s
+Average per call: 0.000008s
+Calls per second: 132325
+
+--- Profiling I3_int (1000 calls) ---
+Total time: 0.0085s
+Average per call: 0.000009s
+Calls per second: 117632
+
+--- Profiling I4_int (1000 calls) ---
+Total time: 0.0643s
+Average per call: 0.000064s
+Calls per second: 15551
+
+--- Profiling I5_int (1000 calls) ---
+Total time: 0.0051s
+Average per call: 0.000005s
+Calls per second: 195466
+
+--- Profiling I6_int (1000 calls) ---
+Total time: 0.0075s
+Average per call: 0.000007s
+Calls per second: 133640
+
+--- Profiling I1_int_a (1000 calls) ---
+Total time: 0.0006s
+Average per call: 0.000001s
+Calls per second: 1718273
+
+--- Profiling I4_int_a (1000 calls) ---
+Total time: 0.0006s
+Average per call: 0.000001s
+Calls per second: 1700164
+
+=== Scaling Analysis ===
+
+--- Testing with nktau = 16 ---
+Time: 0.02s
+Time per tau point: 0.0013s
+Time per matrix element: 0.000082s
+
+--- Testing with nktau = 32 ---
+Time: 0.09s
+Time per tau point: 0.0029s
+Time per matrix element: 0.000091s
+
+--- Testing with nktau = 64 ---
+Time: 0.41s
+Time per tau point: 0.0064s
+Time per matrix element: 0.000099s
+
+--- Testing with nktau = 128 ---
+Time: 1.73s
+Time per tau point: 0.0135s
+Time per matrix element: 0.000106s
+
+=== Memory Usage Analysis ===
+Initial memory usage: 144.4 MB
+Grid size 16: Memory used = 0.0 MB, Total = 144.4 MB
+Grid size 32: Memory used = 0.0 MB, Total = 144.4 MB
+Grid size 64: Memory used = 0.5 MB, Total = 144.9 MB
+Grid size 128: Memory used = 2.3 MB, Total = 147.2 MB
+Grid size 256: Memory used = 14.3 MB, Total = 161.5 MB
