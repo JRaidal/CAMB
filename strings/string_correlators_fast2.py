@@ -25,6 +25,11 @@ from scipy.interpolate import interp1d
 #Parallelization of k-loops
 import concurrent.futures
 
+# Numba for acceleration
+import numba
+from numba import jit
+import math
+
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -193,51 +198,92 @@ xi_interp, v_interp = VOS_solver()
 # Some numerical helpers
 # ========================================================================
 
-def spher_bessel(n, x):
+@jit(nopython=True)
+def spher_bessel_numba(n: int, x: float) -> float:
     """
-    Spherical bessel functions
+    Numba-accelerated spherical bessel function, including negative orders as defined in the original code.
     """
-    x = np.asarray(x); result = np.zeros_like(x, dtype=float); mask_nz = x != 0; mask_z = ~mask_nz
+    if x == 0.0:
+        if n == -1:
+            return 0.0
+        elif n == -2:
+            return -1.0 / 3.0
+        elif n >= 0:
+            return 1.0 if n == 0 else 0.0
+        else:
+            return 0.0
+
     if n == -1:
-        if np.any(mask_nz): result[mask_nz] = np.cos(x[mask_nz]) / x[mask_nz]
-        if np.any(mask_z): result[mask_z] = 0.0 # Should be 1/x -> undefined at 0, or limit to 0.
+        return math.cos(x) / x
     elif n == -2:
-        if np.any(mask_nz): xn = x[mask_nz]; result[mask_nz] = (-np.sin(xn)/xn - np.cos(xn)) / xn
-        if np.any(mask_z): result[mask_z] = -1.0/3.0
-    elif n >= 0:
-        if np.any(mask_nz): result[mask_nz] = sp.spherical_jn(n, x[mask_nz])
-        if np.any(mask_z): result[mask_z] = 1.0 if n == 0 else 0.0
-    else: result = np.zeros_like(x, dtype=float)
-    return np.nan_to_num(result, nan=0.0, posinf=1e10, neginf=-1e10)
+        return (-math.sin(x) / x - math.cos(x)) / x
+    elif n < 0:
+        return 0.0
 
-def sine_integral(x): si, _ = sp.sici(x); return si
+    # Forward recursion for n >= 0
+    if n == 0:
+        return math.sin(x) / x
 
-def factorial(n):
-    try: return sp.gamma(n + 1.0)
-    except ValueError: return np.inf
+    j_prev_prev = math.sin(x) / x  # j0
+    j_prev = (math.sin(x) / x - math.cos(x)) / x  # j1
 
+    if n == 1:
+        return j_prev
 
-# ========================================================================
-# Analytic integrals and their approximations
-# ========================================================================
+    for k in range(2, n + 1):
+        j_current = (2 * k - 1) / x * j_prev - j_prev_prev
+        j_prev_prev = j_prev
+        j_prev = j_current
 
+    return j_current
 
-def I1_int(x, rho, n_terms):
-    val = 0.0; rho_safe = max(rho, 1e-12); x2_safe = max(x**2, 1e-12)
+@jit(nopython=True)
+def I1_int_numba(x: float, rho: float, n_terms: int) -> float:
+    val = 0.0
+    rho_safe = max(rho, 1e-12)
+    x2_safe = max(x**2, 1e-12)
     base = -x2_safe / (2.0 * rho_safe)
+    power = base  # Start with i=1
     for i in range(1, int(n_terms) + 1):
-        fact_i = factorial(i);
-        if fact_i == 0 or fact_i == np.inf or fact_i > 1e300: continue
-        if base == 0: power_term = 0.0 if i > 0 else 1.0
-        elif i * abs(np.log(abs(base) if base != 0 else 1)) < 700: power_term = base**i
-        else: power_term = np.sign(base**i) * np.inf if base != 0 else 0.0
-        if not np.isfinite(power_term): continue
-        term_val = (1.0 / fact_i * (rho_safe / (2.0 * i - 1.0)) * power_term * spher_bessel(i - 1, rho_safe))
-        if not np.isfinite(term_val): continue
-        new_val = val + term_val
-        if not np.isfinite(new_val): break
-        val = new_val
-    return np.nan_to_num(val)
+        fact_i = math.gamma(i + 1.0)
+        if fact_i == 0 or math.isinf(fact_i) or fact_i > 1e300:
+            power *= base
+            continue
+        term_val = (1.0 / fact_i * (rho_safe / (2.0 * i - 1.0)) * power * spher_bessel_numba(i - 1, rho_safe))
+        if not math.isfinite(term_val):
+            power *= base
+            continue
+        val += term_val
+        if not math.isfinite(val):
+            break
+        power *= base
+    return val if math.isfinite(val) else 0.0
+
+@jit(nopython=True)
+def I4_int_numba(x: float, rho: float, n_terms: int) -> float:
+    rho_safe = max(rho, 1e-12)
+    if rho_safe == 0:
+        return 0.0
+    val = math.cos(x) / (rho_safe**2)
+    if not math.isfinite(val):
+        val = 0.0
+    x2_safe = max(x**2, 1e-12)
+    base = -x2_safe / (2.0 * rho_safe)
+    power = base  # Start with i=1
+    for i in range(1, int(n_terms) + 1):
+        fact_i = math.gamma(i + 1.0)
+        if fact_i == 0 or math.isinf(fact_i) or fact_i > 1e300:
+            power *= base
+            continue
+        term_val = - (1.0 / fact_i * (1.0 / (2.0 * i - 1.0)) * power * spher_bessel_numba(i - 2, rho_safe))
+        if not math.isfinite(term_val):
+            power *= base
+            continue
+        val += term_val
+        if not math.isfinite(val):
+            break
+        power *= base
+    return val if math.isfinite(val) else 0.0
 
 def I2_int(x, rho):
     px = rho**2 + x**2;
@@ -252,27 +298,6 @@ def I3_int(x, rho):
     term1 = np.divide(crpx * term1_factor, px, out=np.zeros_like(px), where=px!=0)
     term2 = np.divide(srpx * term2_factor, rpx, out=np.zeros_like(rpx), where=rpx!=0)
     val = term1 + term2; return np.nan_to_num(val, nan=-1/3.0, posinf=0.0, neginf=0.0)
-
-def I4_int(x, rho, n_terms):
-    rho_safe = max(rho, 1e-12);
-    if rho_safe == 0 : return 0.0
-    x2_safe = max(x**2, 1e-12)
-    val = np.cos(x) / rho_safe**2
-    if not np.isfinite(val): val = 0.0
-    base = -x2_safe / (2.0 * rho_safe)
-    for i in range(1, int(n_terms) + 1):
-        fact_i = factorial(i);
-        if fact_i == 0 or fact_i == np.inf or fact_i > 1e300: continue
-        if base == 0: power_term = 0.0 if i > 0 else 1.0
-        elif i * abs(np.log(abs(base) if base != 0 else 1)) < 700: power_term = base**i
-        else: power_term = np.sign(base**i) * np.inf if base != 0 else 0.0
-        if not np.isfinite(power_term): continue
-        term_val = - (1.0 / fact_i * (1.0 / (2.0 * i - 1.0)) * power_term * spher_bessel(i - 2, rho_safe))
-        if not np.isfinite(term_val): continue
-        new_val = val + term_val
-        if not np.isfinite(new_val): break
-        val = new_val
-    return np.nan_to_num(val)
 
 def I5_int(x, rho):
     rho_safe = max(rho, 1e-12); px = rho_safe**2 + x**2
@@ -420,7 +445,7 @@ def get_correlators(tau1, tau2, k, SPR_base):
     use_approx = abs(x1 - x2) >= xapr
     small_rho = rho < 1e-2
     if use_approx: I1=I1_int_a(min(x1,x2),rho_safe); I4=I4_int_a(min(x1,x2),rho_safe)
-    else: I1=I1_int(xm,rho_safe,n_terms)-I1_int(xp,rho_safe,n_terms); I4=I4_int(xm,rho_safe,n_terms)-I4_int(xp,rho_safe,n_terms);
+    else: I1=I1_int_numba(xm,rho_safe,n_terms)-I1_int_numba(xp,rho_safe,n_terms); I4=I4_int_numba(xm,rho_safe,n_terms)-I4_int_numba(xp,rho_safe,n_terms);
     if not use_approx and small_rho: I4 = I1 / 2.0
     I2=I2_int(xm,rho_safe)-I2_int(xp,rho_safe); I3=I3_int(xm,rho_safe)-I3_int(xp,rho_safe)
     if not use_approx and small_rho: I5=I2/2.0; I6=I3/2.0
@@ -620,7 +645,7 @@ def align_eigenvector_signs(eigenfunctions_array, eigenfunctions_deriv_array):
     """
     print("Aligning eigenvector signs across k values...")
 
-    # Make conp.pies to avoid modifying original arrays
+    # Make copies to avoid modifying original arrays
     aligned_eigenfunctions = eigenfunctions_array.copy()
     aligned_derivatives = eigenfunctions_deriv_array.copy()
 
@@ -839,7 +864,7 @@ def plot_uetc_evecs_reconstruction(k_to_plot, tau_values, string_params_obj,
         ax_reco_uetc.set_aspect('equal', adjustable='box')
 
     fig.suptitle(f"UETC Analysis (k={k_to_plot:.3e}, Reco. with {actual_modes_for_reconstruction} modes)", fontsize=14)
-    # plt.savefig(f"uetc_evec_reco_plots_k_{k_to_plot:.2e}.png", dnp.pi=150)
+    # plt.savefig(f"uetc_evec_reco_plots_k_{k_to_plot:.2e}.png", dpi=150)
     plt.show()
     print(f"--- Finished UETC, E-vec, & Reconstruction plots ---")
 
@@ -919,7 +944,7 @@ if __name__ == "__main__":
 
                     # Ensure k_val is positive before taking log
                     if current_k_val_for_deriv <= 0:
-                        print(f"Warning: k_val <= 0 ({current_k_val_for_deriv}) at k_idx={k_idx}, cannot compute log(kτ). Skipnp.ping derivative.")
+                        print(f"Warning: k_val <= 0 ({current_k_val_for_deriv}) at k_idx={k_idx}, cannot compute log(kτ). Skipping derivative.")
                         # Derivatives will remain zero for this k_idx if this happens
                     else:
                         log_ktau_axis = np.log(ktau_grid)
