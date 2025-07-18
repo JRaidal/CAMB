@@ -111,6 +111,7 @@ import numpy as np
 import pandas as pd
 import scipy.special as sp
 from numba import njit, float64, int32
+import matplotlib.pyplot as plt
 
 # --------------------------------------------------------------------
 # Original pure‑Python/SciPy helper
@@ -165,12 +166,12 @@ def I2_int(x, rho):
 
 def I3_int(x, rho):
     px = rho**2 + x**2;
-    if px < 1e-12: return -1/3.0
+    if px < 1e-12: return 2/3.0
     rpx = np.sqrt(px); srpx = np.sin(rpx); crpx = np.cos(rpx)
     term1_factor = (1.0 - 3.0 * x**2 / px); term2_factor = (1.0 - (1.0 + x**2) / px + 3.0 * x**2 / px**2)
     term1 = np.divide(crpx * term1_factor, px, out=np.zeros_like(px), where=px!=0)
     term2 = np.divide(srpx * term2_factor, rpx, out=np.zeros_like(rpx), where=rpx!=0)
-    val = term1 + term2; return np.nan_to_num(val, nan=-1/3.0, posinf=0.0, neginf=0.0)
+    val = term1 + term2; return np.nan_to_num(val, nan=2/3.0, posinf=0.0, neginf=0.0)
 
 
 def I4_int(x, rho, n_terms):
@@ -197,8 +198,8 @@ def I4_int(x, rho, n_terms):
 
 def I5_int(x, rho):
     rho_safe = max(rho, 1e-12); px = rho_safe**2 + x**2
-    if rho_safe**2 < 1e-15 * x**2 and abs(x) > 1e-6: return np.divide(np.sin(x), 2.0*x, out=np.full_like(x, -0.5), where=x!=0)
-    elif px < 1e-12: return -0.5
+    if rho_safe**2 < 1e-15 * x**2 and abs(x) > 1e-6: return np.divide(np.sin(x), 2.0*x, out=np.full_like(x, 0.5), where=x!=0)
+    elif px < 1e-12: return 0.5
     rpx = np.sqrt(px); crpx = np.cos(rpx); val = (np.cos(x) - crpx) / rho_safe**2
     return np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -470,7 +471,6 @@ def time_call_random(fn, n_terms, n_samples=100, repeats=5):
     t1 = time.perf_counter()
     return (t1 - t0) / repeats * 1e3  # ms
 
-
 def time_call_random_2arg(fn, n_samples=100, repeats=5):
     """Time function calls with random x and rho values (for 2-arg functions)"""
     # Generate random test cases with log-uniform distribution
@@ -487,6 +487,86 @@ def time_call_random_2arg(fn, n_samples=100, repeats=5):
             fn(x, rho)
     t1 = time.perf_counter()
     return (t1 - t0) / repeats * 1e3  # ms
+
+def create_integral_visualization(integral_fn, fn_name="Integral", n_grid=512, x_range=(1e-3, 10.0), n_terms=None, save_path=None):
+    """
+    Create a 2D visualization of any integral function as a function of x1 and x2,
+    with rho = |x1 - x2|.
+
+    Parameters:
+    -----------
+    integral_fn : callable
+        The integral function to visualize (e.g., I1_int_numba, I2_int_numba, etc.)
+    fn_name : str
+        Name of the function for plot titles and labels
+    n_grid : int
+        Size of the grid (n_grid x n_grid)
+    x_range : tuple
+        Range of x values (x_min, x_max)
+    n_terms : int, optional
+        Number of terms for series-based integrals (I1, I4). If None, function is called with 2 args.
+    save_path : str, optional
+        Path to save the plot
+    """
+    print(f"Creating {fn_name} visualization on {n_grid}x{n_grid} grid...")
+
+    # Create coordinate arrays
+    x1_vals = np.logspace(np.log10(x_range[0]), np.log10(x_range[1]), n_grid)
+    x2_vals = np.logspace(np.log10(x_range[0]), np.log10(x_range[1]), n_grid)
+
+    # Initialize result matrix
+    result_matrix = np.zeros((n_grid, n_grid))
+
+    # Calculate integral for each (x1, x2) pair
+    for i, x1 in enumerate(x1_vals):
+        if i % 50 == 0:  # Progress indicator
+            print(f"  Progress: {i}/{n_grid} rows completed")
+
+        for j, x2 in enumerate(x2_vals):
+            rho = abs(x1 - x2)
+            if n_terms is not None:
+                # For series-based integrals (I1, I4)
+                result_matrix[i, j] = integral_fn(x1, rho, n_terms)
+            else:
+                # For direct integrals (I2, I3, I5, I6)
+                result_matrix[i, j] = integral_fn(x1, rho)
+
+    print("  Calculation complete, creating plot...")
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Use log scale for better visualization
+    im = ax.imshow(np.log10(np.abs(result_matrix) + 1e-20),
+                   extent=[np.log10(x_range[0]), np.log10(x_range[1]),
+                          np.log10(x_range[0]), np.log10(x_range[1])],
+                   origin='lower',
+                   cmap='viridis',
+                   aspect='equal')
+
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label(f'log₁₀|{fn_name}(x₁, |x₁-x₂|)|')
+
+    # Labels and title
+    ax.set_xlabel('log₁₀(x₂)')
+    ax.set_ylabel('log₁₀(x₁)')
+    if n_terms is not None:
+        ax.set_title(f'{fn_name} Integral Visualization\n(n_terms={n_terms}, grid={n_grid}×{n_grid})')
+    else:
+        ax.set_title(f'{fn_name} Integral Visualization\n(grid={n_grid}×{n_grid})')
+
+    # Add grid
+    ax.grid(True, alpha=0.3)
+
+    # Save if requested
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"  Plot saved to: {save_path}")
+
+    plt.show()
+
+    return result_matrix, x1_vals, x2_vals
 
 
 if __name__ == "__main__":
@@ -602,3 +682,26 @@ if __name__ == "__main__":
     print("\n=== Summary ===")
     print("Performance tests completed with random parameter sampling.")
     print("This provides a more comprehensive view of performance across the parameter space.")
+
+    # Create visualization
+    for name, plain_fn, numba_fn, needs_n_terms in functions:
+        if needs_n_terms:
+            n_terms = 100
+        else:
+            n_terms = None
+        matrix, x1_vals, x2_vals = create_integral_visualization(
+            integral_fn=plain_fn,
+            fn_name=name,
+            n_grid=128,
+            x_range=(1e-4, 100.0),
+            n_terms=n_terms,
+            save_path=f"{name}_plain_visualization.png"
+        )
+        matrix, x1_vals, x2_vals = create_integral_visualization(
+            integral_fn=numba_fn,
+            fn_name=name,
+            n_grid=1024,
+            x_range=(1e-4, 100.0),
+            n_terms=n_terms,
+            save_path=f"{name}_numba_visualization.png"
+        )
