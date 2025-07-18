@@ -242,7 +242,7 @@ def I4_int_a(x, rho):
     return (np.pi * x * j1_rho) / (2.0 * rho_safe)
 
 # --------------------------------------------------------------------
-# Numerically stable implementation of integrals with Numba
+# Numerically stable implementation of integrals / special functions with Numba
 # --------------------------------------------------------------------
 
 SMALL_RHO_LIMIT_NUMBA = 0.01                      # triggers analytic branch
@@ -622,6 +622,124 @@ def I4_int_a_numba(x, rho):
         return math.pi * x * 0.25          # π x / 4  (limit ρ→0)
     return (math.pi * x * 0.5 / rho) * _j1_numba(rho)
 
+
+SN  = np.array([-8.39167827910303881427E-11,  4.62591714427012837309E-8,
+                -9.75759303843632795789E-6,  9.76945438170435310816E-4,
+                -4.13470316229406538752E-2,  1.00000000000000000302E0])
+
+SD  = np.array([ 2.03269266195951942049E-12,  1.27997891179943299903E-9,
+                 4.41827842801218905784E-7,  9.96412122043875552487E-5,
+                 1.42085239326149893930E-2,  9.99999999999999996984E-1])
+
+CN  = np.array([ 2.02524002389102268789E-11, -1.35249504915790756375E-8,
+                 3.59325051419993077021E-6, -4.74007206873407909465E-4,
+                 2.89159652607555242092E-2, -1.00000000000000000080E0])
+
+CD  = np.array([ 4.07746040061880559506E-12,  3.06780997581887812692E-9,
+                 1.23210355685883423679E-6,  3.17442024775032769882E-4,
+                 5.10028056236446052392E-2,  4.00000000000000000080E0])
+
+FN4 = np.array([ 4.23612862892216586994E0,   5.45937717161812843388E0,
+                 1.62083287701538329132E0,   1.67006611831323023771E-1,
+                 6.81020132472518137426E-3,  1.08936580650328664411E-4,
+                 5.48900223421373614008E-7])
+
+FD4 = np.array([ 8.16496634205391016773E0,   7.30828822505564552187E0,
+                 1.86792257950184183883E0,   1.78792052963149907262E-1,
+                 7.01710668322789753610E-3,  1.10034357153915731354E-4,
+                 5.48900252756255700982E-7])
+
+FN8 = np.array([ 4.55880873470465315206E-1,  7.13715274100146711374E-1,
+                 1.60300158222319456320E-1,  1.16064229408124407915E-2,
+                 3.49556442447859055605E-4,  4.86215430826454749482E-6,
+                 3.20092790091004902806E-8,  9.41779576128512936592E-11,
+                 9.70507110881952024631E-14])
+
+FD8 = np.array([ 9.17463611873684053703E-1,  1.78685545332074536321E-1,
+                 1.22253594771971293032E-2,  3.58696481881851580297E-4,
+                 4.92435064317881464393E-6,  3.21956939101046018377E-8,
+                 9.43720590350276732376E-11, 9.70507110881952025725E-14])
+
+GN4 = np.array([ 8.71001698973114191777E-2,  6.11379109952219284151E-1,
+                 3.97180296392337498885E-1,  7.48527737628469092119E-2,
+                 5.38868681462177273157E-3,  1.61999794598934024525E-4,
+                 1.97963874140963632189E-6,  7.82579040744090311069E-9])
+
+GD4 = np.array([ 1.64402202413355338886E0,   6.66296701268987968381E-1,
+                 9.88771761277688796203E-2,  6.22396345441768420760E-3,
+                 1.73221081474177119497E-4,  2.02659182086343991969E-6,
+                 7.82579218933534490868E-9])
+
+GN8 = np.array([ 6.97359953443276214934E-1,  3.30410979305632063225E-1,
+                 3.84878767649974295920E-2,  1.71718239052347903558E-3,
+                 3.48941165502279436777E-5,  3.47131167084116673800E-7,
+                 1.70404452782044526189E-9,  3.85945925430276600453E-12,
+                 3.14040098946363334640E-15])
+
+GD8 = np.array([ 1.68548898811011640017E0,   4.87852258695304967486E-1,
+                 4.67913194259625806320E-2,  1.90284426674399523638E-3,
+                 3.68475504442561108162E-5,  3.57043223443740838771E-7,
+                 1.72693748966316146736E-9,  3.87830166023954706752E-12,
+                 3.14040098946363335242E-15])
+
+
+@njit(cache=True, fastmath=True)
+def sici_numba(x):
+    """
+    Returns (Si(x), Ci(x)) with machine‑precision accuracy,
+    without relying on SciPy.
+    """
+    EULER = 0.5772156649015328606
+    PIO2  = 1.5707963267948966
+
+    if x == 0.0:                         # exact limit
+        return 0.0, -math.inf
+
+    sign = 1.0
+    if x < 0.0:                          # Si is odd, Ci is even
+        sign = -1.0
+        x    = -x
+
+    # ---- very large x : two‑term asymptotic --------------------------------
+    if x > 1.0e9:
+        s  = math.sin(x)
+        c  = math.cos(x)
+        si = PIO2 - c / x
+        ci = s / x
+        if sign < 0.0:
+            si = -si
+        return si, ci
+
+    # ---- |x| ≤ 4  : rational Chebyshev approximations ----------------------
+    if x <= 4.0:
+        z  = x * x
+        s  = x * _polevl(z, SN) / _polevl(z, SD)
+        c  = z * _polevl(z, CN) / _polevl(z, CD)
+        if sign < 0.0:
+            s = -s
+        si = s
+        ci = EULER + math.log(x) + c
+        return si, ci
+
+    # ---- |x| > 4  : auxiliary f(x), g(x) and asymptotic reconstruction -----
+    s  = math.sin(x)
+    c  = math.cos(x)
+    z  = 1.0 / (x * x)
+
+    if x < 8.0:
+        f = _polevl(z, FN4) / (x * _p1evl(z, FD4))
+        g = z * _polevl(z, GN4) / _p1evl(z, GD4)
+    else:
+        f = _polevl(z, FN8) / (x * _p1evl(z, FD8))
+        g = z * _polevl(z, GN8) / _p1evl(z, GD8)
+
+    si = PIO2 - f * c - g * s
+    if sign < 0.0:
+        si = -si
+    ci = f * s - g * c
+    return si, ci
+
+
 # --------------------------------------------------------------------
 # Benchmarking
 # --------------------------------------------------------------------
@@ -742,6 +860,96 @@ def create_integral_visualization(integral_fn, fn_name="Integral", n_grid=512, x
 
 
 if __name__ == "__main__":
+
+    print("=== Testing sp.sici vs sici_numba ===")
+
+    # Test sici_numba vs scipy.special.sici
+    print("\nTesting sici_numba accuracy against scipy.special.sici:")
+
+    # Generate test cases with various ranges
+    test_x_values = np.array([
+        # Small values
+        1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1,
+        # Medium values
+        0.5, 1.0, 2.0, 3.0, 4.0, 5.0,
+        # Large values
+        8.0, 10.0, 20.0, 50.0, 100.0, 1000.0,
+        # Negative values (test symmetry)
+        -1e-3, -0.1, -1.0, -5.0, -10.0
+    ])
+
+    print(f"Testing {len(test_x_values)} values:")
+    print(f"{'x':>12} {'scipy_Si':>15} {'numba_Si':>15} {'Si_reldiff':>12} {'scipy_Ci':>15} {'numba_Ci':>15} {'Ci_reldiff':>12}")
+    print("-" * 100)
+
+    max_si_reldiff = 0.0
+    max_ci_reldiff = 0.0
+    problem_cases = []
+
+    for x in test_x_values:
+        # Get scipy result
+        scipy_si, scipy_ci = sp.sici(x)
+
+        # Get numba result
+        numba_si, numba_ci = sici_numba(x)
+
+        # Calculate relative differences
+        si_reldiff = abs(scipy_si - numba_si) / abs(scipy_si) if abs(scipy_si) > 1e-15 else 0.0
+        ci_reldiff = abs(scipy_ci - numba_ci) / abs(scipy_ci) if abs(scipy_ci) > 1e-15 and np.isfinite(scipy_ci) else 0.0
+
+        max_si_reldiff = max(max_si_reldiff, si_reldiff)
+        max_ci_reldiff = max(max_ci_reldiff, ci_reldiff)
+
+        # Flag problematic cases
+        if si_reldiff > 1e-6 or ci_reldiff > 1e-6:
+            problem_cases.append((x, scipy_si, numba_si, si_reldiff, scipy_ci, numba_ci, ci_reldiff))
+
+        print(f"{x:12.2e} {scipy_si:15.8e} {numba_si:15.8e} {si_reldiff:12.2e} {scipy_ci:15.8e} {numba_ci:15.8e} {ci_reldiff:12.2e}")
+
+    print(f"\nSummary:")
+    print(f"Maximum Si relative error: {max_si_reldiff:.2e}")
+    print(f"Maximum Ci relative error: {max_ci_reldiff:.2e}")
+    print(f"Problem cases (rel_diff > 1e-6): {len(problem_cases)}")
+
+    if problem_cases:
+        print("\nProblem cases:")
+        for x, scipy_si, numba_si, si_reldiff, scipy_ci, numba_ci, ci_reldiff in problem_cases:
+            print(f"  x={x:8.2e}: Si_err={si_reldiff:.2e}, Ci_err={ci_reldiff:.2e}")
+    else:
+        print("✓ All cases within tolerance (1e-6)")
+
+    # Performance comparison
+    print("\n=== Performance Comparison: sp.sici vs sici_numba ===")
+
+    # Generate larger test set for timing
+    np.random.seed(42)
+    n_timing_samples = 1000
+    timing_x_vals = np.logspace(np.log10(1e-3), np.log10(1e3), n_timing_samples)
+
+    # Time scipy version
+    t0 = time.perf_counter()
+    for _ in range(3):  # 3 repeats
+        for x in timing_x_vals:
+            sp.sici(x)
+    t1 = time.perf_counter()
+    scipy_time = (t1 - t0) / 3 * 1e3  # ms
+
+    # Time numba version
+    t0 = time.perf_counter()
+    for _ in range(3):  # 3 repeats
+        for x in timing_x_vals:
+            sici_numba(x)
+    t1 = time.perf_counter()
+    numba_time = (t1 - t0) / 3 * 1e3  # ms
+
+    speedup = scipy_time / numba_time if numba_time > 0 else float('inf')
+
+    print(f"Timing results ({n_timing_samples} samples, 3 repeats):")
+    print(f"  scipy.special.sici: {scipy_time:.2f} ms")
+    print(f"  sici_numba:         {numba_time:.2f} ms")
+    print(f"  Speedup:            {speedup:.1f}x")
+
+    print("\n" + "="*60)
 
     print("=== Performance Benchmarks with Random Parameters ===\n")
 

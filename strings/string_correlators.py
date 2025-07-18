@@ -69,7 +69,7 @@ SPRa = StringParams(mu=string_tension, alpha=string_wigglyness, L=string_decay)
 
 # The ranges for k and ktau for which correlators are calculated in final table
 k_min = 1e-6; k_max= 10; nk = 100
-ktau_min= 1e-4; ktau_max = 1e3; nktau = 512
+ktau_min= 1e-4; ktau_max = 1e3; nktau = 256
 
 # Number of eigenmodes to include in final table
 nmodes = nktau
