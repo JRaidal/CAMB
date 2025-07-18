@@ -22,6 +22,8 @@ import scipy.interpolate
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
+from numba import njit, float64, int32
+
 
 from integrals import I1_int, I2_int, I3_int, I4_int, I5_int, I6_int, I1_int_a, I4_int_a
 from integrals import I1_int_numba, I2_int_numba, I3_int_numba, I4_int_numba, I5_int_numba, I6_int_numba, I1_int_a_numba, I4_int_a_numba
@@ -67,7 +69,7 @@ SPRa = StringParams(mu=string_tension, alpha=string_wigglyness, L=string_decay)
 
 # The ranges for k and ktau for which correlators are calculated in final table
 k_min = 1e-6; k_max= 10; nk = 100
-ktau_min= 1e-4; ktau_max = 1e3; nktau = 256
+ktau_min= 1e-4; ktau_max = 1e3; nktau = 512
 
 # Number of eigenmodes to include in final table
 nmodes = nktau
