@@ -3,10 +3,166 @@ Fast generation of UETC eigenmode tables for the Unconnected Segment Model
 ==========================================================================
 This is a fast version of the string correlator code.
 
+Original Fortran version:
 
+scaling_factor = 1.0d0/(max(xi1*tau1,xi2*tau2))**3
 
+ubroutine get_uetc(tau1,tau2,k,uetc_val)
+    implicit none
+    real(DP), intent(in) :: tau1,tau2,k
+    real(DP), intent(out) :: uetc_val(5)
+    real(DP) :: x,x1,x2,xp,xm,rho,sum
+    real(DP) :: I1,I2,I3,I4,I5,I6
+    real(DP) :: a1,a2,a3,a4,a5,a6,C
+    integer i,nterms,status
+    real(DP) :: xi1,xi2,alpha,alpha1,alpha2,mu,mu1,mu2,v,v1,v2,L
+    Type(StringParams) :: SPR1,SPR2
 
+    call get_SPR(tau1,SPR1)
+    call get_SPR(tau2,SPR2)
 
+    xi1 = SPR1%xi
+    xi2 = SPR2%xi
+    alpha1 = SPR1%alpha
+    alpha2 = SPR2%alpha
+    mu1 = SPR1%mu
+    mu2 = SPR2%mu
+    v1 = SPR1%v
+    v2 = SPR2%v
+    L = SPR1%L
+
+    x1 = k*tau1*xi1
+    x2 = k*tau2*xi2
+    xp=(x1+x2)/2.0d0
+    xm=(x1-x2)/2.0d0
+    rho = k*abs(v1*tau1-v2*tau2)
+
+    if (uetc_feedback.gt.1) then
+       write(*,*) 'x1:',x1
+       write(*,*) 'x2:',x2
+       write(*,*) 'rho:',rho
+    end if
+
+    uetc_val(:) = 0.0d0
+
+    if ((x1.le.xmin) .and. (x2.le.xmin)) then
+       ! Use form for small x1 and x2
+       if (uetc_feedback.gt.1) write(*,*) 'Using small x'
+       uetc_val(1) = -(alpha1*alpha2*mu1*mu2*(-6.0d0 + rho**2.0d0)*x1*x2)/&
+                     (6.0d0*k**2.0d0*dsqrt((-1.0d0+ v1**2.0d0)*(-1.0d0 + v2**2.0d0)))
+       uetc_val(2) = (mu1*mu2*(rho**2.0d0*(-10.0d0 + (10.0d0 - 11.0d0*alpha2**2.0d0)*v2**2.0d0 + &
+                      v1**2.0d0*(10.0d0 - 11.0d0*alpha1**2.0d0 + (-10.0d0 + 11.0d0*alpha1**2.0d0 + &
+                      11.0d0*(1.0d0 - 2.0d0*alpha1**2.0d0)*alpha2**2.0d0)*v2**2.0d0)) + 42.0d0*(2.0d0 + &
+                      (-2.0d0 + alpha2**2.0d0)*v2**2.0d0 + v1**2.0d0*(-2.0d0 + alpha1**2.0d0 + (2.0d0 - &
+                      alpha1**2.0d0 + (-1.0d0 + 2.0d0*alpha1**2.0d0)*alpha2**2.0d0)*v2**2.0d0)))*x1*x2)/&
+                      (420.0d0*alpha1*alpha2*k**2.0d0*dsqrt((-1.0d0 + v1**2.0d0)*(-1.0d0 + v2**2.0d0)))
+       uetc_val(3) = (mu1*mu2*2.3*(8 + 4*(-2 + alpha1**2)*v1**2 + (-8 - 4*(-2 + alpha1**2)*v1**2 + &
+                     alpha2**2*(4 + (-4 + 7*alpha1**2)*v1**2))*v2**2)*x1*x2)/(256.*alpha1*alpha2*k**2*dsqrt(1 - v1**2)*dsqrt(1 - v2**2))
+       uetc_val(4) = -(mu1*mu2*(-28.0d0 + 6.0d0*rho**2.0d0 + 28.0d0*v1**2.0d0 - 14.0d0*alpha1**2.0d0*v1**&
+                     2.0d0 - 6.0d0*rho**2.0d0*v1**2.0d0 + alpha1**2.0d0*rho**2.0d0*v1**2.0d0 + &
+                     28.0d0*v2**2.0d0 - 14.0d0*alpha2**2.0d0*v2**2.0d0 - 6.0d0*rho**2.0d0*v2**2.0d0 + &
+                     alpha2**2.0d0*rho**2.0d0*v2**2.0d0 - 28.0d0*v1**2.0d0*v2**2.0d0 + 14.0d0*alpha1**&
+                     2.0d0*v1**2.0d0*v2**2.0d0 + 14.0d0*alpha2**2.0d0*v1**2.0d0*v2**2.0d0 - &
+                     28.0d0*alpha1**2.0d0*alpha2**2.0d0*v1**2.0d0*v2**2.0d0 + 6.0d0*rho**2.0d0*v1**2.0d0*&
+                     v2**2.0d0 - alpha1**2.0d0*rho**2.0d0*v1**2.0d0*v2**2.0d0 - alpha2**2.0d0*rho**2.0d0*&
+                     v1**2.0d0*v2**2.0d0 + 2.0d0*alpha1**2.0d0*alpha2**2.0d0*rho**2.0d0*v1**2.0d0*v2**&
+                     2.0d0)*x1*x2)/(420.0d0*alpha1*alpha2*k**2.0d0*dsqrt((-1.0d0 + v1**2.0d0)*&
+                     (-1.0d0 + v2**2.0d0)))
+       uetc_val(5) = -(mu1*mu2*rho**2.0d0*(alpha1**2*(1.0d0 + (-1.0d0 + 2.0d0*alpha2**2.0d0)*v2**2.0d0)+ &
+                     alpha2**2*(1.0d0 + (-1.0d0 + 2.0d0*alpha1**2.0d0)*v1**2.0d0))*&
+                     x1*x2)/(60.0d0*alpha1*alpha2*k**2.0d0*dsqrt((-1.0d0 + v1**2.0d0)*(-1.0d0 + v2**2.0d0)))
+       uetc_val(1:5) = scaling_factor(tau1,tau2,xi1,xi2,L)*uetc_val(1:5)
+
+       return
+    end if
+
+    if (abs(x1-x2).le.etcmin) then
+       ! Use ETC expression
+       if (uetc_feedback.gt.1) write(*,*) 'Using ETC'
+       x=(x1+x2)/2.0d0
+       alpha=(alpha1+alpha2)/2.0d0
+       v=(v1+v2)/2.0d0
+       mu=(mu1+mu2)/2.0d0
+       uetc_val(1) = 2.0d0*alpha**2*mu**2*(-1.0d0+cos(x)+x*sine_integral(x))/(k**2.0d0*(1.0d0-v**2.0d0))
+       uetc_val(2) = (mu**2*((8*(-18 + x**2) + 8*(-2 + alpha**2)*v**2*(-18 + x**2) + &
+               v**4*(8*(-18 + x**2) - 8*alpha**2*(-18 + x**2) + alpha**4*(-54 + 11*x**2)))*cos(x) + &
+               (-32*(1 + (-2 + alpha**2)*v**2 + (1 - alpha**2 + alpha**4)*v**4)*x**3 + &
+               3*(-8*(-6 + x**2) - 8*(-2 + alpha**2)*v**2*(-6 + x**2) + &
+               v**4*(-8*(-6 + x**2) + 8*alpha**2*(-6 + x**2) + alpha**4*(18 + x**2)))*sin(x))/x + &
+               (8 + 8*(-2 + alpha**2)*v**2 + (8 - 8*alpha**2 + 11*alpha**4)*v**4)*x**3*sine_integral(x)))/ &
+               (16.*alpha**2*k**2*(1 - v**2)*x**2)
+       uetc_val(3) = (mu**2*((2.0d0*(8.0d0+8.0d0*(-2.0d0+alpha**2)*v**2 + &
+            (8.0d0-8.0d0*alpha**2+3*alpha**4)*v**4)*(x**3 + 3.0d0*x*cos(x) - 3.0d0*sin(x)))/(3.0d0*x**3) &
+            + alpha**4*v**4*(-2.0d0+cos(x)+sin(x)/(x)+x*sine_integral(x))))/(8.0d0*alpha**2*k**2*(1-v**2))
+       uetc_val(4) = (mu**2*(3*(8 + 8*(-2 + alpha**2)*v**2 + (8 - 8*alpha**2 + 3*alpha**4)*v**4)*(-2 + x**2)*cos(x) + &
+            (64*(-1 + v**2)*(1 + (-1 + alpha**2)*v**2)*x**3 - &
+            3*(-8*(2 + x**2) - 8*(-2 + alpha**2)*v**2*(2 + x**2) + &
+            v**4*(-8*(2 + x**2) + 8*alpha**2*(2 + x**2) + alpha**4*(-6 + 5*x**2)))*sin(x))/x + &
+            3*(8 + 8*(-2 + alpha**2)*v**2 + (8 - 8*alpha**2 + 3*alpha**4)*v**4)*x**3*sine_integral(x)))/ &
+            (96.*alpha**2*k**2*(1 - v**2)*x**2)
+       uetc_val(5) = (mu**2*(2 + (-2 + alpha**2)*v**2)*(-4 + cos(x) + (3*sin(x))/x + x*sine_integral(x)))/(2.*k**2*(1 - v**2))
+       uetc_val(1:5) = scaling_factor(tau1,tau2,xi1,xi2,L)*uetc_val(1:5)
+       return
+    end if
+
+    !00
+    a1 = 2*alpha1*alpha2
+    sum = a1*I1
+    uetc_val(1) = sum*mu1*mu2*scaling_factor(tau1,tau2,xi1,xi2,L)/(k**2*dsqrt(1.0d0-v1**2)*dsqrt(1.0d0-v2**2))
+
+    !SCALAR
+    a1 = (-27*alpha1**2*alpha2**2*v1**2*v2**2 + rho**2*(1 + (-1 + 2*alpha1**2)*v1**2)*(1 + (-1 + 2*alpha2**2)*v2**2))/&
+         (2.*alpha1*alpha2*rho**2)
+    a2 = (-3*(-9*alpha1**2*alpha2**2*v1**2*v2**2 + rho**2*(-1 + v2**2 + v1**2*(1 + (-1 + alpha1**2*alpha2**2)*v2**2))))/(2.*alpha1*alpha2*rho**2)
+    a3 = (-9*(1 + (-1 + alpha1**2)*v1**2)*(1 + (-1 + alpha2**2)*v2**2))/(2.*alpha1*alpha2)
+    a4 = (-3*(-(alpha2**2*rho**2*(-1 + v1**2)*v2**2) + alpha1**2*v1**2*(-18*alpha2**2*v2**2 + rho**2*(1 + (-1 + 4*alpha2**2)*v2**2))))/&
+         (2.*alpha1*alpha2*rho**2)
+    a5 = (3*(-(alpha2**2*rho**2*(-1 + v1**2)*v2**2) + alpha1**2*v1**2*(-18*alpha2**2*v2**2 + rho**2*(1 + (-1 + 4*alpha2**2)*v2**2))))/&
+         (2.*alpha1*alpha2*rho**2)
+    a6 = (9*(-(alpha2**2*(-1 + v1**2)*v2**2) + alpha1**2*v1**2*(1 + (-1 + 2*alpha2**2)*v2**2)))/(2.*alpha1*alpha2)
+    sum = a1*I1 + a2*I2 + a3*I3 + a4*I4 + a5*I5 + a6*I6
+    uetc_val(2) = sum*mu1*mu2*scaling_factor(tau1,tau2,xi1,xi2,L)/(k**2*dsqrt(1.0d0-v1**2)*dsqrt(1.0d0-v2**2))
+
+    !VECTOR
+    a1 = (3*alpha1*alpha2*v1**2*v2**2)/rho**2
+    a2 = (-3*alpha1*alpha2*v1**2*v2**2)/rho**2
+    a3 = ((1 + (-1 + alpha1**2)*v1**2)*(1 + (-1 + alpha2**2)*v2**2))/(alpha1*alpha2)
+    a4 = (alpha1*alpha2*(-6 + rho**2)*v1**2*v2**2)/rho**2
+    a5 = -((alpha1*alpha2*(-6 + rho**2)*v1**2*v2**2)/rho**2)
+    a6 = (alpha2**2*(-1 + v1**2)*v2**2 - alpha1**2*v1**2*(1 + (-1 + 2*alpha2**2)*v2**2))/(alpha1*alpha2)
+    sum = a1*I1 + a2*I2 + a3*I3 + a4*I4 + a5*I5 + a6*I6
+    uetc_val(3) = sum*mu1*mu2*scaling_factor(tau1,tau2,xi1,xi2,L)/(k**2*dsqrt(1.0d0-v1**2)*dsqrt(1.0d0-v2**2))
+
+    !TENSOR
+    a1 = (-3.0d0*alpha1**2.0d0*alpha2**2.0d0*v1**2.0d0*v2**2.0d0 + rho**2.0d0*(-1.0d0 + v1**2.0d0)*&
+         (-1.0d0 + v2**2.0d0))/(4.0d0*alpha1*alpha2*rho**2.0d0)
+    a2 = (3.0d0*alpha1**2.0d0*alpha2**2.0d0*v1**2.0d0*v2**2.0d0 + rho**2.0d0*(-1.0d0 + v2**2.0d0 + &
+         v1**2.0d0*(1.0d0 + (-1.0d0 + alpha1**2.0d0*alpha2**2.0d0)*v2**2.0d0)))/&
+         (4.0d0*alpha1*alpha2*rho**2.0d0)
+    a3 = -((1.0d0 + (-1.0d0 + alpha1**2.0d0)*v1**2.0d0)*(1.0d0 + (-1.0d0 + alpha2**2.0d0)*v2**2.0d0))/&
+         (4.0d0*alpha1*alpha2)
+    a4 = (-(alpha2**2.0d0*rho**2.0d0*(-1.0d0 + v1**2.0d0)*v2**2.0d0) + alpha1**2.0d0*v1**2.0d0*&
+         (6.0d0*alpha2**2.0d0*v2**2.0d0 - rho**2.0d0*(-1.0d0 + v2**2.0d0)))/&
+         (4.0d0*alpha1*alpha2*rho**2.0d0)
+    a5 = (alpha2**2.0d0*rho**2.0d0*(-1.0d0 + v1**2.0d0)*v2**2.0d0 + alpha1**2.0d0*v1**2.0d0*&
+         (-6.0d0*alpha2**2.0d0*v2**2.0d0 + rho**2.0d0*(-1.0d0 + v2**2.0d0)))/&
+         (4.0d0*alpha1*alpha2*rho**2.0d0)
+    a6 = (-(alpha2**2.0d0*(-1.0d0 + v1**2.0d0)*v2**2.0d0) + alpha1**2.0d0*v1**2.0d0*(1.0d0 + &
+         (-1.0d0 + 2.0d0*alpha2**2.0d0)*v2**2.0d0))/(4.0d0*alpha1*alpha2)
+    sum = a1*I1 + a2*I2 + a3*I3 + a4*I4 + a5*I5 + a6*I6
+    uetc_val(4) = sum*mu1*mu2*scaling_factor(tau1,tau2,xi1,xi2,L)/(k**2*dsqrt(1.0d0-v1**2)*dsqrt(1.0d0-v2**2))
+
+    !00-SCALAR
+    a1 = (-(alpha2**2*(-1 + v1**2)) + alpha1**2*(1 - v2**2 + 2*alpha2**2*(v1**2 + v2**2)))/(2.*alpha1*alpha2)
+    a2 = (-3*(-(alpha2**2*(-1 + v1**2)) + alpha1**2*(1 - v2**2 + alpha2**2*(v1**2 + v2**2))))/(2.*alpha1*alpha2)
+    a3 = 0.0d0
+    a4 = (-3*alpha1*alpha2*(v1**2 + v2**2))/2
+    a5 = (3*alpha1*alpha2*(v1**2 + v2**2))/2
+    a6 = 0.0d0
+    sum = a1*I1 + a2*I2 + a3*I3 + a4*I4 + a5*I5 + a6*I6
+    uetc_val(5) = sum*mu1*mu2*scaling_factor(tau1,tau2,xi1,xi2,L)/(k**2*dsqrt(1.0d0-v1**2)*dsqrt(1.0d0-v2**2))
+
+  end subroutine get_uetc
 
 Author : Juhan Raidal and Adam Moss
 Date   : 2025‑07‑17
@@ -186,7 +342,6 @@ def _get_correlator_pair(tau1, tau2, k,
         norm_denom_etc = math.sqrt(norm_denom_etc_sq)
 
         mu = (mu1 + mu2) / 2.0; tau=(tau1+tau2)/2; xi=(xi1+xi2)/2
-        base_etc_factor=common_factor
 
         six, _ = sici_numba(x)
 
@@ -195,7 +350,7 @@ def _get_correlator_pair(tau1, tau2, k,
         else: sinx_over_x = sinx / x
 
         term00_num=2.0*alpha**2*(-1.0+cosx+x*six);
-        uetc_val[0]=term00_num * base_etc_factor
+        uetc_val[0]=term00_num * common_factor
         if x==0 or alpha==0: termS=0.0
         else:
             term1_s=(8*(-18+x**2)+8*(-2+alpha**2)*v**2*(-18+x**2)+v**4*(8*(-18+x**2)-8*alpha**2*(-18+x**2)+alpha**4*(-54+11*x**2)))*cosx
@@ -206,7 +361,7 @@ def _get_correlator_pair(tau1, tau2, k,
             term3_s=(8+8*(-2+alpha**2)*v**2+(8-8*alpha**2+11*alpha**4)*v**4)*x**3*six
             termS_num=term1_s+term2_s+term3_s
             termS=termS_num/(16.0*alpha**2*x**2) if (x!=0 and alpha!=0) else 0.0
-        uetc_val[1]=termS * base_etc_factor
+        uetc_val[1]=termS * common_factor
         if x==0 or alpha==0: termV=0.0
         else:
              if abs(x) < 1e-12:
@@ -215,7 +370,7 @@ def _get_correlator_pair(tau1, tau2, k,
              term1_v=(2.0*(8.0+8.0*(-2.0+alpha**2)*v**2+(8.0-8.0*alpha**2+3*alpha**4)*v**4))*tV1_sub
              term2_v=alpha**4*v**4*(-2.0+cosx+sinx_over_x+x*six)
              termV_num=term1_v+term2_v; termV=termV_num/(8.0*alpha**2) if alpha!=0 else 0.0
-        uetc_val[2]=termV * base_etc_factor
+        uetc_val[2]=termV * common_factor
         if x==0 or alpha==0: termT=0.0
         else:
             term1_t=3*(8+8*(-2+alpha**2)*v**2+(8-8*alpha**2+3*alpha**4)*v**4)*(-2+x**2)*cosx
@@ -226,13 +381,13 @@ def _get_correlator_pair(tau1, tau2, k,
             term3_t=3*(8+8*(-2+alpha**2)*v**2+(8-8*alpha**2+3*alpha**4)*v**4)*x**3*six
             termT_num=term1_t+term2_t+term3_t
             termT=termT_num/(96.0*alpha**2*x**2) if (x!=0 and alpha!=0) else 0.0
-        uetc_val[3]=termT * base_etc_factor
+        uetc_val[3]=termT * common_factor
         if x==0:
             term00S_num=0.0
         else: term00S_num=(mu**2*(2+(-2+alpha**2)*v**2)*(-4+cosx+3*sinx_over_x+x*six))
         term00S=term00S_num/(2.*k**2*norm_denom_etc) if norm_denom_etc>1e-12 else 0.0
-        uetc_val[4]=term00S
-        return [val * sf for val in uetc_val]
+        uetc_val[4]=term00S*common_factor
+        return uetc_val
 
     # --- Regime 3: General Case ---
     n_terms_raw = max(min_terms, int(scale_terms * xp))
@@ -461,7 +616,8 @@ def plot_uetc(filename="correlator_table_fast.npz", k_indices=None, mode_indices
 
     # Get sample k for matrix visualization
     sample_k_idx = k_indices[len(k_indices)//2]  # middle k value
-    sample_k = k_grid[sample_k_idx]
+
+    sample_k = 1.0
     tau_vec = ktau_grid / sample_k
 
     print(f"\nGenerating 2D UETC matrices for k = {sample_k:.3e} Mpc⁻¹")
@@ -471,29 +627,55 @@ def plot_uetc(filename="correlator_table_fast.npz", k_indices=None, mode_indices
     m00, mS, mV, mT, m00S = mats
 
     # ROW 1: 4 UETC correlation matrices (plots 1-4)
-    matrix_data = [m00, mS, mV, mT]
+    # Apply display scaling like the original implementation
+    mu_sq = mu**2
+    matrix_data_raw = [m00, mS, mV, mT]
+    matrix_data = []
+
+    for mat_raw in matrix_data_raw:
+        n_tau = len(tau_vec)
+        mat_scaled = np.zeros_like(mat_raw)
+        for i_tau in range(n_tau):
+            tau1 = tau_vec[i_tau]
+            for j_tau in range(n_tau):
+                tau2 = tau_vec[j_tau]
+                plot_display_scaling = (tau1 * tau2)**0.5 / mu_sq if mu_sq != 0 else 0
+                mat_scaled[i_tau, j_tau] = mat_raw[i_tau, j_tau] * plot_display_scaling
+        matrix_data.append(mat_scaled)
+
     matrix_names = ['C₀₀(τ₁,τ₂)', 'Cₛ(τ₁,τ₂)', 'Cᵥ(τ₁,τ₂)', 'Cₜ(τ₁,τ₂)']
+
+    # Create log axes for contour plots
+    log_tau_axis = np.log10(tau_vec)
+    log_tau_grid_x, log_tau_grid_y = np.meshgrid(log_tau_axis, log_tau_axis, indexing='ij')
 
     for i, (mat, name) in enumerate(zip(matrix_data, matrix_names)):
         ax = plt.subplot(3, 4, 1 + i)
 
-        # Use symmetric colormap and handle potential zeros
-        vmax = np.max(np.abs(mat))
-        if vmax > 0:
-            im = plt.imshow(mat, extent=[tau_vec[0], tau_vec[-1], tau_vec[0], tau_vec[-1]],
-                           cmap='RdBu_r', vmin=-vmax, vmax=vmax, origin='lower',
-                           aspect='auto')
-            plt.colorbar(im, ax=ax, shrink=0.8)
-        else:
-            plt.imshow(np.zeros_like(mat), extent=[tau_vec[0], tau_vec[-1], tau_vec[0], tau_vec[-1]],
-                      cmap='gray', origin='lower', aspect='auto')
+        # Mask invalid values
+        data_plot = np.ma.masked_invalid(mat)
+        if not data_plot.mask.all():
+            vmin, vmax = np.nanmin(data_plot), np.nanmax(data_plot)
+            if vmin == vmax:
+                vmin -= abs(vmin * 0.1) if vmin != 0 else 0.1
+                vmax += abs(vmax * 0.1) if vmax != 0 else 0.1
+            if vmin == vmax:
+                vmin, vmax = vmin - 0.1, vmax + 0.1  # ensure range
 
-        plt.xscale('log')
-        plt.yscale('log')
-        plt.xlabel('τ₁ [Mpc]')
-        plt.ylabel('τ₂ [Mpc]')
+            n_levels = 200
+            levels = np.linspace(vmin, vmax, n_levels) if vmin < vmax else n_levels
+            contour = ax.contourf(log_tau_grid_x, log_tau_grid_y, data_plot,
+                                 levels=levels, cmap='jet', vmin=vmin, vmax=vmax, extend='both')
+            plt.colorbar(contour, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+        else:
+            # Handle case with all invalid data
+            ax.contourf(log_tau_grid_x, log_tau_grid_y, np.zeros_like(mat),
+                       levels=1, cmap='gray')
+
+        plt.xlabel(r'$\log_{10}(\tau_1)$ [Mpc]')
+        plt.ylabel(r'$\log_{10}(\tau_2)$ [Mpc]')
         plt.title(f'{name}\nk = {sample_k:.2e} Mpc⁻¹')
-        plt.grid(True, alpha=0.3)
+        ax.set_aspect('equal', adjustable='box')
 
     # ROW 2: Eigenfunctions for different types (plots 5-8)
     for itype in range(4):
@@ -545,22 +727,39 @@ def plot_uetc(filename="correlator_table_fast.npz", k_indices=None, mode_indices
 
     # Plot 11: Cross-correlation matrix C₀₀,ₛ
     ax = plt.subplot(3, 4, 11)
-    vmax = np.max(np.abs(m00S))
-    if vmax > 0:
-        im = plt.imshow(m00S, extent=[tau_vec[0], tau_vec[-1], tau_vec[0], tau_vec[-1]],
-                       cmap='RdBu_r', vmin=-vmax, vmax=vmax, origin='lower',
-                       aspect='auto')
-        plt.colorbar(im, ax=ax, shrink=0.8)
-    else:
-        plt.imshow(np.zeros_like(m00S), extent=[tau_vec[0], tau_vec[-1], tau_vec[0], tau_vec[-1]],
-                  cmap='gray', origin='lower', aspect='auto')
 
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.xlabel('τ₁ [Mpc]')
-    plt.ylabel('τ₂ [Mpc]')
+    # Apply scaling to cross-correlation matrix too
+    n_tau = len(tau_vec)
+    m00S_scaled = np.zeros_like(m00S)
+    for i_tau in range(n_tau):
+        tau1 = tau_vec[i_tau]
+        for j_tau in range(n_tau):
+            tau2 = tau_vec[j_tau]
+            plot_display_scaling = (tau1 * tau2)**0.5 / mu_sq if mu_sq != 0 else 0
+            m00S_scaled[i_tau, j_tau] = m00S[i_tau, j_tau] * plot_display_scaling
+
+    # Mask invalid values
+    data_plot_cross = np.ma.masked_invalid(m00S_scaled)
+    if not data_plot_cross.mask.all():
+        vmax = np.max(np.abs(data_plot_cross))
+        vmin = -vmax  # symmetric range for cross-correlation
+        if vmax > 0:
+            n_levels = 50
+            levels = np.linspace(vmin, vmax, n_levels)
+            contour = ax.contourf(log_tau_grid_x, log_tau_grid_y, data_plot_cross,
+                                 levels=levels, cmap='RdBu_r', vmin=vmin, vmax=vmax, extend='both')
+            plt.colorbar(contour, ax=ax, orientation='vertical', fraction=0.046, pad=0.04)
+        else:
+            ax.contourf(log_tau_grid_x, log_tau_grid_y, np.zeros_like(m00S_scaled),
+                       levels=1, cmap='gray')
+    else:
+        ax.contourf(log_tau_grid_x, log_tau_grid_y, np.zeros_like(m00S_scaled),
+                   levels=1, cmap='gray')
+
+    plt.xlabel(r'$\log_{10}(\tau_1)$ [Mpc]')
+    plt.ylabel(r'$\log_{10}(\tau_2)$ [Mpc]')
     plt.title(f'C₀₀,ₛ(τ₁,τ₂)\nk = {sample_k:.2e} Mpc⁻¹')
-    plt.grid(True, alpha=0.3)
+    ax.set_aspect('equal', adjustable='box')
 
     # Plot 12: Matrix statistics
     ax = plt.subplot(3, 4, 12)

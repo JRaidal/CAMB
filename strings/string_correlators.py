@@ -22,11 +22,7 @@ import scipy.interpolate
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
-from numba import njit, float64, int32
-
-
 from integrals import I1_int, I2_int, I3_int, I4_int, I5_int, I6_int, I1_int_a, I4_int_a
-from integrals import I1_int_numba, I2_int_numba, I3_int_numba, I4_int_numba, I5_int_numba, I6_int_numba, I1_int_a_numba, I4_int_a_numba
 
 #Parallelization of k-loops
 import concurrent.futures
@@ -321,12 +317,12 @@ def get_correlators(tau1, tau2, k, SPR_base):
     n_terms = min(n_terms_raw, MAX_N_TERMS)
     use_approx = abs(x1 - x2) >= xapr
     small_rho = rho < 1e-2
-    if use_approx: I1=I1_int_a_numba(min(x1,x2),rho_safe); I4=I4_int_a_numba(min(x1,x2),rho_safe)
-    else: I1=I1_int_numba(xm,rho_safe,n_terms)-I1_int_numba(xp,rho_safe,n_terms); I4=I4_int_numba(xm,rho_safe,n_terms)-I4_int_numba(xp,rho_safe,n_terms);
+    if use_approx: I1=I1_int_a(min(x1,x2),rho_safe); I4=I4_int_a(min(x1,x2),rho_safe)
+    else: I1=I1_int(xm,rho_safe,n_terms)-I1_int(xp,rho_safe,n_terms); I4=I4_int(xm,rho_safe,n_terms)-I4_int(xp,rho_safe,n_terms);
     if not use_approx and small_rho: I4 = I1 / 2.0
-    I2=I2_int_numba(xm,rho_safe)-I2_int_numba(xp,rho_safe); I3=I3_int_numba(xm,rho_safe)-I3_int_numba(xp,rho_safe)
+    I2=I2_int(xm,rho_safe)-I2_int(xp,rho_safe); I3=I3_int(xm,rho_safe)-I3_int(xp,rho_safe)
     if not use_approx and small_rho: I5=I2/2.0; I6=I3/2.0
-    else: I5=I5_int_numba(xm,rho_safe)-I5_int_numba(xp,rho_safe); I6=I6_int_numba(xm,rho_safe)-I6_int_numba(xp,rho_safe)
+    else: I5=I5_int(xm,rho_safe)-I5_int(xp,rho_safe); I6=I6_int(xm,rho_safe)-I6_int(xp,rho_safe)
     integrals = [I1, I2, I3, I4, I5, I6];
     if not all(np.isfinite(i) for i in integrals): return np.zeros(5)
     safe_a1a2rho2=max(2.*alpha1*alpha2*rho_safe**2,1e-30); safe_a1a2=max(2.*alpha1*alpha2,1e-30)
