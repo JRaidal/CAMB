@@ -4,6 +4,8 @@ import numpy as np
 import sys
 import os
 import argparse
+import time
+
 # Get the absolute path to the CAMB root directory
 CAMB_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if CAMB_dir not in sys.path:
@@ -138,14 +140,17 @@ def setup_camb_params(args):
 
 def load_correlator_data(args):
     """Load UETC correlator data"""
+    t_start_load = time.time()
     if args.datafile is None:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        npz_filename = os.path.join(script_dir, "correlator_table.npz")
+        npz_filename = os.path.join(script_dir, "correlator_table_fast.npz")
     else:
         npz_filename = args.datafile
 
     print(f"Loading UETC data from: {npz_filename}...")
     correlator_data = np.load(npz_filename)
+
+    print(f"Data loaded. (took {time.time() - t_start_load:.2f}s)")
 
     return {
         'k_grid': correlator_data['k_grid'],
@@ -163,6 +168,7 @@ def load_correlator_data(args):
 
 def setup_active_sources(correlator_data, args):
     """Setup ActiveSources object with correlator data"""
+    t_start_setup = time.time()
     print("Initializing custom Fortran object...")
     active_sources = ActiveSources()
     active_sources.set_correlator_table(
@@ -178,7 +184,7 @@ def setup_active_sources(correlator_data, args):
         nmodes_param=correlator_data['nmodes_from_file'],
         weighting_param=correlator_data['weighting_from_file']
     )
-    print("Fortran data transfer successful")
+    print(f"Fortran data transfer successful. (took {time.time() - t_start_setup:.2f}s)")
 
     return active_sources
 
@@ -186,7 +192,8 @@ def calculate_power_spectra(pars, args):
     """Calculate power spectra for baseline and UETC sources for all polarization components"""
 
     # Calculate baseline (no UETC sources)
-    print("Calculating baseline C_l (UETC sources OFF)...")
+    t_start_baseline = time.time()
+    print("\nCalculating baseline C_l (UETC sources OFF)...")
     pars.ActiveSources.set_active_eigenmode(0)
     results_baseline = camb.get_results(pars)
 
@@ -196,7 +203,7 @@ def calculate_power_spectra(pars, args):
     lmax_calc = cl_baseline_all.shape[0] - 1
     ls_calc = np.arange(lmax_calc + 1)
 
-    print(f"Baseline C_l calculated up to LMAX={lmax_calc}.")
+    print(f"Baseline C_l calculated up to LMAX={lmax_calc}. (took {time.time() - t_start_baseline:.2f}s)")
 
     # Calculate UETC sources by summing modes
     correlator_data = load_correlator_data(args)
@@ -211,13 +218,15 @@ def calculate_power_spectra(pars, args):
     if args.tensor:
         enabled_modes.append('tensor')
 
-    print(f"Calculating UETC C_l by summing {actual_n_modes_to_sum} eigenmodes...")
+    print(f"\nCalculating UETC C_l by summing {actual_n_modes_to_sum} eigenmodes...")
     print(f"Using {', '.join(enabled_modes)} mode(s)")
+    t_start_strings = time.time()
 
     cl_strings_sum_all = np.zeros_like(cl_baseline_all)
 
     for i_mode in range(1, actual_n_modes_to_sum + 1):
-        print(f"  Processing eigenmode {i_mode}/{actual_n_modes_to_sum}...")
+        t_start_mode = time.time()
+        print(f"  Processing eigenmode {i_mode}/{actual_n_modes_to_sum}...", end='', flush=True)
         pars.ActiveSources.set_active_eigenmode(i_mode)
 
         results_mode_i = camb.get_results(pars)
@@ -229,8 +238,10 @@ def calculate_power_spectra(pars, args):
         min_len = min(len(cl_strings_sum_all), len(cl_mode_i_all))
         cl_strings_sum_all[:min_len] += cl_mode_i_all[:min_len]
 
+        print(f" (took {time.time() - t_start_mode:.2f}s)")
+
     pars.ActiveSources.set_active_eigenmode(0)
-    print("UETC C_l calculation finished.")
+    print(f"UETC C_l calculation finished. (took {time.time() - t_start_strings:.2f}s)")
 
     # Return all polarization components
     return ls_calc, cl_baseline_all, cl_strings_sum_all
@@ -240,7 +251,8 @@ def plot_results(ls_calc, cl_baseline_all, cl_strings_all, args):
     if args.no_plot:
         return
 
-    print("Plotting results...")
+    t_start_plot = time.time()
+    print("\nPlotting results...")
 
     # Use a more compatible matplotlib style
     try:
@@ -280,10 +292,8 @@ def plot_results(ls_calc, cl_baseline_all, cl_strings_all, args):
         axs[i, 0].plot(ls_plot, cl_strings_pol*(args.gmu)**2, label=f'Strings ({mode_str})', color='C1', linestyle='-')
         axs[i, 0].set_xlabel(r'$\ell$')
         axs[i, 0].set_ylabel(rf'$\ell(\ell+1)C_\ell^{{{pol_name}}}/2\pi \, [{units_label}]$')
-        #axs[i, 0].set_title(f'Strings {mode_str} Power Spectrum ({pol_name})')
         axs[i, 0].set_xlim([2, args.lmax])
         axs[i, 0].set_xscale('log')
-        # Set y-axis to log scale for EE and BB
         if pol_name in ['EE', 'BB']:
             axs[i, 0].set_yscale('log')
         axs[i, 0].legend()
@@ -294,9 +304,7 @@ def plot_results(ls_calc, cl_baseline_all, cl_strings_all, args):
         axs[i, 1].plot(ls_plot, cl_baseline_pol, label=f'Baseline ({mode_str})', color='C0', linestyle='-')
         axs[i, 1].set_xlabel(r'$\ell$')
         axs[i, 1].set_ylabel(rf'$\ell(\ell+1)C_\ell^{{{pol_name}}}/2\pi \, [{units_label}]$')
-        #axs[i, 1].set_title(f'Baseline {mode_str} Power Spectrum ({pol_name})')
         axs[i, 1].set_xlim([2, args.lmax])
-        # Set y-axis to log scale for EE and BB, linear for TT and TE
         if pol_name in ['EE', 'BB']:
             axs[i, 1].set_yscale('log')
         else:
@@ -312,9 +320,11 @@ def plot_results(ls_calc, cl_baseline_all, cl_strings_all, args):
         print(f"Plot saved to {args.output}")
     else:
         plt.show()
+    print(f"Plotting complete. (took {time.time() - t_start_plot:.2f}s)")
 
 def main():
     """Main function"""
+    overall_start_time = time.time()
     args = parse_arguments()
 
     # Determine which modes are enabled
@@ -340,10 +350,13 @@ def main():
     print(f"  Units: {args.units}")
     print()
 
+    t_start_setup = time.time()
     print("Setting up CAMB parameters...")
 
     # Setup CAMB parameters
     pars = setup_camb_params(args)
+    print(f"CAMB parameter setup complete. (took {time.time() - t_start_setup:.2f}s)")
+
 
     # Load correlator data
     correlator_data = load_correlator_data(args)
@@ -353,11 +366,13 @@ def main():
     pars.ActiveSources = active_sources
 
     # Calculate power spectra
+    t_start_calc = time.time()
     ls_calc, cl_baseline_all, cl_strings_all = calculate_power_spectra(pars, args)
+    print(f"\nTotal power spectra calculation finished. (took {time.time() - t_start_calc:.2f}s)")
 
     # Plot results
     plot_results(ls_calc, cl_baseline_all, cl_strings_all, args)
-
+    print(f"\nTotal script execution time: {time.time() - overall_start_time:.2f} seconds.")
     print("--- Script Finished ---")
 
 if __name__ == "__main__":

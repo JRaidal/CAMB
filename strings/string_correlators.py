@@ -22,6 +22,8 @@ import scipy.interpolate
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
+from integrals import I1_int, I2_int, I3_int, I4_int, I5_int, I6_int, I1_int_a, I4_int_a
+
 #Parallelization of k-loops
 import concurrent.futures
 
@@ -67,7 +69,7 @@ ktau_min= 1e-4; ktau_max = 1e3; nktau = 256
 
 # Number of eigenmodes to include in final table
 nmodes = nktau
-# Weighting of eigenvalue decomposition 
+# Weighting of eigenvalue decomposition
 weighting = 0.25; # 'γ' in papers
 
 # Correlator calculation parameters (leave unchanged)
@@ -97,18 +99,18 @@ def solve_cosmology(tau_eval):
     #Initial conditions
     tau_min = tau_eval.min()
     a_initial = np.sqrt(OMEGAS['R']) * H0 * tau_min
-    
+
     #Solve Friedmann for scale factor
     sol_cosmo = solve_ivp(
         friedmann_rhs, [tau_min, tau_eval.max()], [a_initial],
         args=(H0, OMEGAS), method='DOP853', t_eval=tau_eval
     )
-    
+
     if not sol_cosmo.success:
         raise RuntimeError(f"Cosmology ODE solver failed: {sol_cosmo.message}")
 
     a_solution = sol_cosmo.y[0]
-    
+
     #Use solution for a to calculate ℋ
     term_R = OMEGAS['R'] / a_solution**2
     term_M = OMEGAS['M'] / a_solution
@@ -119,11 +121,11 @@ def solve_cosmology(tau_eval):
     #Create interpolators
     a_interp = interp1d(tau_eval, a_solution, kind='cubic', fill_value="extrapolate")
     H_c_interp = interp1d(tau_eval, H_conformal_solution, kind='cubic', fill_value="extrapolate")
-    
+
     return a_interp, H_c_interp, tau_eval, a_solution, H_conformal_solution
 
 # ======================================================
-# String dynamics 
+# String dynamics
 # ======================================================
 
 def k_tilde_func(v):
@@ -141,13 +143,13 @@ def VOS_equations(tau, y, cr, H_c_interp):
 
     k_tilde = k_tilde_func(v)
     H_c = H_c_interp(tau)
-    
+
     #VOS ODEs
     dxi_dtau = 1/tau*(v**2 * xi*tau*H_c - xi + cr * v / 2.0)
     dv_dtau =  (1.0 - v**2) * (k_tilde / (xi*tau) - 2.0 * v*H_c)
     # dxi_dtau = 0
     # dv_dtau =  0
-    
+
     return [dxi_dtau, dv_dtau]
 
 def VOS_solver(cr=0.23):
@@ -156,12 +158,12 @@ def VOS_solver(cr=0.23):
     """
     # Solution time range in seconds
     tau_min_s, tau_max_s = 1e-4, 8e17
-    
+
     #Convert time to conformal time
     s_per_mpc = Mpc_in_m / c_m_per_s
     tau_min = tau_min_s / s_per_mpc
     tau_max = tau_max_s / s_per_mpc
-    
+
     #Get cosmology
     tau_span = [tau_min*0.9, tau_max*1.1]
     tau_eval = np.logspace(np.log10(tau_min), np.log10(tau_max), 5000)
@@ -179,10 +181,10 @@ def VOS_solver(cr=0.23):
         method='LSODA', t_eval=tau_eval
     )
     xi, v = sol.y
-    
+
     xi_interp = interp1d(tau_eval, xi, kind='linear', fill_value="extrapolate")
     v_interp = interp1d(tau_eval, v, kind='linear', fill_value="extrapolate")
-    
+
     return xi_interp, v_interp
 
 #Call solver to use in correlator calculations
@@ -193,111 +195,7 @@ xi_interp, v_interp = VOS_solver()
 # Some numerical helpers
 # ========================================================================
 
-def spher_bessel(n, x):
-    """
-    Spherical bessel functions
-    """
-    x = np.asarray(x); result = np.zeros_like(x, dtype=float); mask_nz = x != 0; mask_z = ~mask_nz
-    if n == -1:
-        if np.any(mask_nz): result[mask_nz] = np.cos(x[mask_nz]) / x[mask_nz]
-        if np.any(mask_z): result[mask_z] = 0.0 # Should be 1/x -> undefined at 0, or limit to 0.
-    elif n == -2:
-        if np.any(mask_nz): xn = x[mask_nz]; result[mask_nz] = (-np.sin(xn)/xn - np.cos(xn)) / xn
-        if np.any(mask_z): result[mask_z] = -1.0/3.0
-    elif n >= 0:
-        if np.any(mask_nz): result[mask_nz] = sp.spherical_jn(n, x[mask_nz])
-        if np.any(mask_z): result[mask_z] = 1.0 if n == 0 else 0.0
-    else: result = np.zeros_like(x, dtype=float)
-    return np.nan_to_num(result, nan=0.0, posinf=1e10, neginf=-1e10)
-
 def sine_integral(x): si, _ = sp.sici(x); return si
-
-def factorial(n):
-    try: return sp.gamma(n + 1.0)
-    except ValueError: return np.inf
-    
-
-# ========================================================================
-# Analytic integrals and their approximations
-# ========================================================================
-
-
-def I1_int(x, rho, n_terms):
-    val = 0.0; rho_safe = max(rho, 1e-12); x2_safe = max(x**2, 1e-12)
-    base = -x2_safe / (2.0 * rho_safe)
-    for i in range(1, int(n_terms) + 1):
-        fact_i = factorial(i);
-        if fact_i == 0 or fact_i == np.inf or fact_i > 1e300: continue
-        if base == 0: power_term = 0.0 if i > 0 else 1.0
-        elif i * abs(np.log(abs(base) if base != 0 else 1)) < 700: power_term = base**i
-        else: power_term = np.sign(base**i) * np.inf if base != 0 else 0.0
-        if not np.isfinite(power_term): continue
-        term_val = (1.0 / fact_i * (rho_safe / (2.0 * i - 1.0)) * power_term * spher_bessel(i - 1, rho_safe))
-        if not np.isfinite(term_val): continue
-        new_val = val + term_val
-        if not np.isfinite(new_val): break
-        val = new_val
-    return np.nan_to_num(val)
-
-def I2_int(x, rho):
-    px = rho**2 + x**2;
-    if px < 1e-12: return 1.0
-    rpx = np.sqrt(px); srpx = np.sin(rpx); return np.divide(srpx, rpx, out=np.ones_like(srpx), where=rpx!=0)
-
-def I3_int(x, rho):
-    px = rho**2 + x**2;
-    if px < 1e-12: return -1/3.0
-    rpx = np.sqrt(px); srpx = np.sin(rpx); crpx = np.cos(rpx)
-    term1_factor = (1.0 - 3.0 * x**2 / px); term2_factor = (1.0 - (1.0 + x**2) / px + 3.0 * x**2 / px**2)
-    term1 = np.divide(crpx * term1_factor, px, out=np.zeros_like(px), where=px!=0)
-    term2 = np.divide(srpx * term2_factor, rpx, out=np.zeros_like(rpx), where=rpx!=0)
-    val = term1 + term2; return np.nan_to_num(val, nan=-1/3.0, posinf=0.0, neginf=0.0)
-    
-def I4_int(x, rho, n_terms):
-    rho_safe = max(rho, 1e-12);
-    if rho_safe == 0 : return 0.0
-    x2_safe = max(x**2, 1e-12)
-    val = np.cos(x) / rho_safe**2
-    if not np.isfinite(val): val = 0.0
-    base = -x2_safe / (2.0 * rho_safe)
-    for i in range(1, int(n_terms) + 1):
-        fact_i = factorial(i);
-        if fact_i == 0 or fact_i == np.inf or fact_i > 1e300: continue
-        if base == 0: power_term = 0.0 if i > 0 else 1.0
-        elif i * abs(np.log(abs(base) if base != 0 else 1)) < 700: power_term = base**i
-        else: power_term = np.sign(base**i) * np.inf if base != 0 else 0.0
-        if not np.isfinite(power_term): continue
-        term_val = - (1.0 / fact_i * (1.0 / (2.0 * i - 1.0)) * power_term * spher_bessel(i - 2, rho_safe))
-        if not np.isfinite(term_val): continue
-        new_val = val + term_val
-        if not np.isfinite(new_val): break
-        val = new_val
-    return np.nan_to_num(val)
-
-def I5_int(x, rho):
-    rho_safe = max(rho, 1e-12); px = rho_safe**2 + x**2
-    if rho_safe**2 < 1e-15 * x**2 and abs(x) > 1e-6: return np.divide(np.sin(x), 2.0*x, out=np.full_like(x, -0.5), where=x!=0)
-    elif px < 1e-12: return -0.5
-    rpx = np.sqrt(px); crpx = np.cos(rpx); val = (np.cos(x) - crpx) / rho_safe**2
-    return np.nan_to_num(val, nan=0.0, posinf=0.0, neginf=0.0)
-
-def I6_int(x, rho):
-    px = rho**2 + x**2;
-    if px < 1e-12: return 1/3.0
-    rpx = np.sqrt(px); srpx = np.sin(rpx); crpx = np.cos(rpx)
-    term1 = np.divide(srpx, rpx, out=np.ones_like(srpx), where=rpx!=0)
-    val = np.divide(term1 - crpx, px, out=np.full_like(px, 1/3.0), where=px!=0)
-    return np.nan_to_num(val, nan=1/3.0, posinf=0.0, neginf=0.0)
-
-#Integral approximations
-def I1_int_a(x, rho):
-    if rho == 0: return np.pi * x / 2.0
-    j0_rho = sp.jv(0, rho); return (np.pi * x / 2.0) * j0_rho
-def I4_int_a(x, rho):
-    if rho == 0: return np.pi*x/4.0
-    rho_safe = max(rho, 1e-12); j1_rho = sp.jv(1, rho_safe)
-    return (np.pi * x * j1_rho) / (2.0 * rho_safe)
-
 
 # ========================================================================
 # Correlator calculation
@@ -315,30 +213,30 @@ def get_correlators(tau1, tau2, k, SPR_base):
     Main function that calculates the string two-point correlators. Note that these expressions
     differ slightly from those presented in the papers, as there is functionality to include two different
     populations of strings (hence parameters1 and parameters2), although this is not used.
-    
+
     """
     # Call parameters
     uetc_val = np.zeros(5); parameters1 = SPRa; parameters2 = SPRa
     alpha1=parameters1.alpha; alpha2=parameters2.alpha; mu1=parameters1.mu; mu2=parameters2.mu
     L_decay = parameters1.L
-    
+
     # Use interpolators calculated before to find VOS parameter values.
     v1=v_interp(tau1)
     xi1=xi_interp(tau1)
     v2=v_interp(tau2)
     xi2=xi_interp(tau2)
-        
+
     # Find x and rho as in paper
     x1=k*tau1*xi1; x2=k*tau2*xi2; xp=(x1+x2)/2.0; xm=(x1-x2)/2.0
     rho=k*abs(v1*tau1-v2*tau2); rho_safe=max(rho, 1e-12)
-    
+
     # Common factors for all correlators
     norm_denom_sq = (1.0 - v1**2)*(1.0 - v2**2)
     norm_denom = np.sqrt(norm_denom_sq)
     sf = scaling_factor(tau1, tau2, xi1, xi2, L_decay)
-    common_factor_base = sf / (k**2*norm_denom) 
+    common_factor_base = sf / (k**2*norm_denom)
     common_factor = mu1*mu2*common_factor_base
-    
+
     # --- Regime 1: Small x---
     if x1 <= xmin and x2 <= xmin:
         if alpha1==0 or alpha2==0: return uetc_val
@@ -361,15 +259,15 @@ def get_correlators(tau1, tau2, k, SPR_base):
         norm_denom_etc_sq = (1.0 - v**2);
         if norm_denom_etc_sq <= 1e-16 : return np.zeros(5)
         norm_denom_etc = np.sqrt(norm_denom_etc_sq)
-        
+
         mu = (mu1 + mu2) / 2.0; tau=(tau1+tau2)/2; xi=(xi1+xi2)/2
-        
+
         # Recalculate common factors
-        sf = scaling_factor(tau, tau, xi, xi, L_decay) 
+        sf = scaling_factor(tau, tau, xi, xi, L_decay)
         common_factor_base = 1 / (k**2*norm_denom)
-        common_factor = mu**2*common_factor_base 
+        common_factor = mu**2*common_factor_base
         base_etc_factor=common_factor
-        
+
         cosx=np.cos(x); sinx=np.sin(x); six=sine_integral(x)
         if abs(x) < 1e-12: sinx_over_x = 1.0
         else: sinx_over_x = sinx / x
@@ -381,7 +279,7 @@ def get_correlators(tau1, tau2, k, SPR_base):
             term1_s=(8*(-18+x**2)+8*(-2+alpha**2)*v**2*(-18+x**2)+v**4*(8*(-18+x**2)-8*alpha**2*(-18+x**2)+alpha**4*(-54+11*x**2)))*cosx
             term2_s_num=(-32*(1+(-2+alpha**2)*v**2+(1-alpha**2+alpha**4)*v**4)*x**3+3*(-8*(-6+x**2)-8*(-2+alpha**2)*v**2*(-6+x**2)+v**4*(-8*(-6+x**2)+8*alpha**2*(-6+x**2)+alpha**4*(18+x**2)))*sinx)
             if abs(x) < 1e-12:
-                term2_s = 0.0 
+                term2_s = 0.0
             else: term2_s=term2_s_num / x
             term3_s=(8+8*(-2+alpha**2)*v**2+(8-8*alpha**2+11*alpha**4)*v**4)*x**3*six
             termS_num=term1_s+term2_s+term3_s
@@ -389,8 +287,8 @@ def get_correlators(tau1, tau2, k, SPR_base):
         uetc_val[1]=termS * base_etc_factor
         if x==0 or alpha==0: termV=0.0
         else:
-             if abs(x) < 1e-12: 
-                 tV1_sub = 0.0 
+             if abs(x) < 1e-12:
+                 tV1_sub = 0.0
              else: tV1_sub = (x**3 + 3.0*x*cosx - 3.0*sinx) / (3.0 * x**3)
              term1_v=(2.0*(8.0+8.0*(-2.0+alpha**2)*v**2+(8.0-8.0*alpha**2+3*alpha**4)*v**4))*tV1_sub
              term2_v=alpha**4*v**4*(-2.0+cosx+sinx_over_x+x*six)
@@ -401,17 +299,17 @@ def get_correlators(tau1, tau2, k, SPR_base):
             term1_t=3*(8+8*(-2+alpha**2)*v**2+(8-8*alpha**2+3*alpha**4)*v**4)*(-2+x**2)*cosx
             term2_t_num=(64*(-1+v**2)*(1+(-1+alpha**2)*v**2)*x**3-3*(-8*(2+x**2)-8*(-2+alpha**2)*v**2*(2+x**2)+v**4*(-8*(2+x**2)+8*alpha**2*(2+x**2)+alpha**4*(-6+5*x**2)))*sinx)
             if abs(x) < 1e-12:
-                term2_t = 0.0 
+                term2_t = 0.0
             else: term2_t = term2_t_num / x
             term3_t=3*(8+8*(-2+alpha**2)*v**2+(8-8*alpha**2+3*alpha**4)*v**4)*x**3*six
             termT_num=term1_t+term2_t+term3_t
             termT=termT_num/(96.0*alpha**2*x**2) if (x!=0 and alpha!=0) else 0.0
         uetc_val[3]=termT * base_etc_factor
-        if x==0: 
+        if x==0:
             term00S_num=0.0
-        else: term00S_num=(mu**2*(2+(-2+alpha**2)*v**2)*(-4+cosx+3*sinx_over_x+x*six))
-        term00S=term00S_num/(2.*k**2*norm_denom_etc) if norm_denom_etc>1e-12 else 0.0
-        uetc_val[4]=term00S
+        else: term00S_num=((2+(-2+alpha**2)*v**2)*(-4+cosx+3*sinx_over_x+x*six))
+        term00S=term00S_num/(2.) if norm_denom_etc>1e-12 else 0.0
+        uetc_val[4]=term00S*base_etc_factor
         uetc_val *= sf; return np.nan_to_num(uetc_val)
 
     # --- Regime 3: General Case ---
@@ -421,14 +319,14 @@ def get_correlators(tau1, tau2, k, SPR_base):
     small_rho = rho < 1e-2
     if use_approx: I1=I1_int_a(min(x1,x2),rho_safe); I4=I4_int_a(min(x1,x2),rho_safe)
     else: I1=I1_int(xm,rho_safe,n_terms)-I1_int(xp,rho_safe,n_terms); I4=I4_int(xm,rho_safe,n_terms)-I4_int(xp,rho_safe,n_terms);
-    if not use_approx and small_rho: I4 = I1 / 2.0 
+    if not use_approx and small_rho: I4 = I1 / 2.0
     I2=I2_int(xm,rho_safe)-I2_int(xp,rho_safe); I3=I3_int(xm,rho_safe)-I3_int(xp,rho_safe)
     if not use_approx and small_rho: I5=I2/2.0; I6=I3/2.0
     else: I5=I5_int(xm,rho_safe)-I5_int(xp,rho_safe); I6=I6_int(xm,rho_safe)-I6_int(xp,rho_safe)
     integrals = [I1, I2, I3, I4, I5, I6];
     if not all(np.isfinite(i) for i in integrals): return np.zeros(5)
     safe_a1a2rho2=max(2.*alpha1*alpha2*rho_safe**2,1e-30); safe_a1a2=max(2.*alpha1*alpha2,1e-30)
-    
+
     sum00=2*alpha1*alpha2*I1; uetc_val[0]=sum00*common_factor
     c_term1=(-27*(alpha1*alpha2*v1*v2)**2+rho_safe**2*(1+(-1+2*alpha1**2)*v1**2)*(1+(-1+2*alpha2**2)*v2**2))/safe_a1a2rho2
     c_term2=(-3*(-9*(alpha1*alpha2*v1*v2)**2+rho_safe**2*(-1+v2**2+v1**2*(1+(-1+(alpha1*alpha2)**2)*v2**2))))/safe_a1a2rho2
@@ -455,7 +353,7 @@ def get_correlators(tau1, tau2, k, SPR_base):
     c_term2=(-3*(-(alpha2**2*(-1+v1**2))+alpha1**2*(1-v2**2+alpha2**2*(v1**2+v2**2))))/safe_a1a2
     c_term3=0.0; c_term4=(-3*alpha1*alpha2*(v1**2+v2**2))/2.0; c_term5=(3*alpha1*alpha2*(v1**2+v2**2))/2.0; c_term6=0.0
     sumC=c_term1*I1+c_term2*I2+c_term3*I3+c_term4*I4+c_term5*I5+c_term6*I6; uetc_val[4]=sumC*common_factor
-    
+
     return np.nan_to_num(uetc_val)
 
 # ========================================================================
@@ -502,14 +400,14 @@ def diagonalize_correlators(uetc_matrices_raw, tau_vals_local, weighting_local, 
     tau_i, tau_j = np.meshgrid(tau_vals_local, tau_vals_local, indexing='ij')
 
     base_for_power = (k_current_val**2) * tau_i * tau_j
-    
+
     full_diagonalization_weight = np.power(base_for_power, weighting_local)
     full_diagonalization_weight = np.nan_to_num(full_diagonalization_weight)*(tau_i*tau_j)**0.5
 
     # Apply this full weighting to the raw UETC matrices to form the matrix to be diagonalized
-    vv_matrix_weighted = full_diagonalization_weight * vvarray_raw 
-    tt_matrix_weighted = full_diagonalization_weight * ttarray_raw 
-    
+    vv_matrix_weighted = full_diagonalization_weight * vvarray_raw
+    tt_matrix_weighted = full_diagonalization_weight * ttarray_raw
+
     scalar_matrix_weighted = np.zeros((2 * n, 2 * n), dtype=float)
     scalar_matrix_weighted[0:n, 0:n]     = full_diagonalization_weight * ss00array_raw
     scalar_matrix_weighted[n:2*n, n:2*n] = full_diagonalization_weight * ssarray_raw
@@ -518,7 +416,7 @@ def diagonalize_correlators(uetc_matrices_raw, tau_vals_local, weighting_local, 
 
     # Decompose matrices
     eigen_results = {}
-    
+
     scalar_eval, scalar_evec = scipy.linalg.eigh(scalar_matrix_weighted)
     vv_eval, vv_evec           = scipy.linalg.eigh(vv_matrix_weighted)
     tt_eval, tt_evec           = scipy.linalg.eigh(tt_matrix_weighted)
@@ -527,7 +425,7 @@ def diagonalize_correlators(uetc_matrices_raw, tau_vals_local, weighting_local, 
     eigen_results['eval_S'] = scalar_eval[2*n - nmodes_local:][::-1]
     top_scalar_evecs        = scalar_evec[:, 2*n - nmodes_local:][:, ::-1]
     # Eigenvectors (u_i(k,τ))
-    eigen_results['evec_00']= top_scalar_evecs[0:n, :].T 
+    eigen_results['evec_00']= top_scalar_evecs[0:n, :].T
     eigen_results['evec_S'] = top_scalar_evecs[n:2*n, :].T
 
     eigen_results['eval_V'] = vv_eval[n - nmodes_local:][::-1]
@@ -535,10 +433,10 @@ def diagonalize_correlators(uetc_matrices_raw, tau_vals_local, weighting_local, 
 
     eigen_results['eval_T'] = tt_eval[n - nmodes_local:][::-1]
     eigen_results['evec_T'] = tt_evec[:, n - nmodes_local:][:, ::-1].T
-    
-    
+
+
     eigen_results['eval_00']=scalar_eval[n - nmodes_local:n][::-1]
-    
+
     return eigen_results
 
 def calculate_eigenvectors(k_val, spr_parameters, tau_vals_local, weighting_local, nmodes_local):
@@ -549,7 +447,7 @@ def calculate_eigenvectors(k_val, spr_parameters, tau_vals_local, weighting_loca
     """
 
     correlator_matrices = {key: np.zeros((ntau_calc, ntau_calc)) for key in ['UETC_00','UETC_S','UETC_V','UETC_T','UETC_00S']}
-    
+
     # Calculate correlator matrices
     for i in range(ntau_calc):
         for j in range(i, ntau_calc): # Iterate only for upper triangle + diagonal
@@ -568,7 +466,7 @@ def calculate_eigenvectors(k_val, spr_parameters, tau_vals_local, weighting_loca
                     correlator_matrices['UETC_V'][j,i]  = raw_uetc_results[2]
                     correlator_matrices['UETC_T'][j,i]  = raw_uetc_results[3]
                     correlator_matrices['UETC_00S'][j,i]= raw_uetc_results[4]
-    
+
     # Diagonalize
     diag_results = diagonalize_correlators(
         correlator_matrices, tau_vals_local, weighting_local, nmodes_local, k_val
@@ -586,7 +484,7 @@ def calculate_eigenvectors(k_val, spr_parameters, tau_vals_local, weighting_loca
         'eigenvalues_V': diag_results['eval_V'],
         'eigenvalues_T': diag_results['eval_T'],
     }
-    
+
     return result_dictionary, correlator_matrices
 
 # ========================================================================
@@ -606,62 +504,62 @@ def worker_calculate_for_k(args_tuple):
 def align_eigenvector_signs(eigenfunctions_array, eigenfunctions_deriv_array):
     """
     Aligns the signs of eigenvectors across k values to ensure smooth evolution.
-    
+
     Parameters:
     -----------
     eigenfunctions_array : np.ndarray
         Shape (nk, num_eigen_types, nmodes, nktau) - the eigenvectors u_i(k,τ)
-    eigenfunctions_deriv_array : np.ndarray  
+    eigenfunctions_deriv_array : np.ndarray
         Shape (nk, num_eigen_types, nmodes, nktau) - the derivatives du_i/d(log(kτ))
-    
+
     Returns:
     --------
     Tuple of (aligned_eigenfunctions, aligned_derivatives)
     """
     print("Aligning eigenvector signs across k values...")
-    
+
     # Make conp.pies to avoid modifying original arrays
     aligned_eigenfunctions = eigenfunctions_array.copy()
     aligned_derivatives = eigenfunctions_deriv_array.copy()
-    
+
     nk, num_eigen_types, nmodes, nktau = eigenfunctions_array.shape
-    
+
     # Process each eigenfunction type separately
     for type_idx in range(num_eigen_types):
         print(f"  Processing eigenfunction type {type_idx}...")
-        
+
         # For each mode within this type
         for mode_idx in range(nmodes):
             v_prev = None
-            
+
             # Loop through k values
             for k_idx in range(nk):
                 # Current eigenvector for this (type, mode, k)
                 current_vec = aligned_eigenfunctions[k_idx, type_idx, mode_idx, :]
-                
+
                 # Skip if current vector is all NaN
                 if np.all(np.isnan(current_vec)):
                     continue
-                
+
                 # If we have a previous vector, align signs
                 if v_prev is not None and not np.all(np.isnan(v_prev)):
                     # Calculate overlap (dot product) between current and previous
                     # Only use valid (non-NaN) points for both vectors
                     valid_mask = ~(np.isnan(current_vec) | np.isnan(v_prev))
-                    
+
                     if np.sum(valid_mask) > 0:  # Need at least some valid points
                         dot_product = np.sum(current_vec[valid_mask] * v_prev[valid_mask])
-                        
+
                         # If overlap is negative, flip the sign
                         if dot_product < 0:
                             aligned_eigenfunctions[k_idx, type_idx, mode_idx, :] *= -1
                             aligned_derivatives[k_idx, type_idx, mode_idx, :] *= -1
                             # Update current_vec for next iteration (get fresh reference after modification)
                             current_vec = aligned_eigenfunctions[k_idx, type_idx, mode_idx, :]
-                
+
                 # Store current vector as previous for next k
                 v_prev = current_vec.copy()
-    
+
     print("Sign alignment completed.")
     return aligned_eigenfunctions, aligned_derivatives
 
@@ -671,7 +569,7 @@ def plot_uetc_evecs_reconstruction(k_to_plot, tau_values, string_params_obj,
                                    uetc_n_levels=15):
     """
     Sanity check function.
-    
+
     Generates plots for:
     1. Original Scaled correlator components.
     2. Top N eigenvectors.
@@ -688,7 +586,7 @@ def plot_uetc_evecs_reconstruction(k_to_plot, tau_values, string_params_obj,
     # Ensure we don't try to plot/use more modes than calculated
     actual_num_evecs_to_plot = min(num_evecs_to_plot, nmodes_total_calculated)
     actual_modes_for_reconstruction = min(num_modes_for_reconstruction, nmodes_total_calculated)
-    
+
     # --- Calculate Correlator matrices and Eigenvectors ---
     eigen_data, correlator_matrices = calculate_eigenvectors(
         k_to_plot, string_params_obj, tau_values,
@@ -706,21 +604,21 @@ def plot_uetc_evecs_reconstruction(k_to_plot, tau_values, string_params_obj,
                 tau2 = tau_values[j]
                 raw_value = raw_matrix[j, i] # raw_matrix is [tau2_idx, tau1_idx]
                 plot_display_scaling = (tau1 * tau2)**0.5 / mu_sq if mu_sq != 0 else 0
-                
+
                 correlator_data_scaled[comp_idx][j, i] = raw_value * plot_display_scaling
 
     # --- 3. Reconstruct UETCs from eigenvectors and eigenvalues ---
     # M_reconstructed(τᵢ,τⱼ) = ( Σ_p λ_p u_p(τᵢ)u_p(τⱼ) ) / W(τᵢ,τⱼ)
     # W(τᵢ,τⱼ) = (k²τᵢτⱼ)^γ * (τᵢτⱼ)^0.5
-    
+
     reconstructed_correlator = [np.full((ntau, ntau), np.nan) for _ in range(5)]
 
     tau_i_mesh, tau_j_mesh = np.meshgrid(tau_values, tau_values, indexing='ij') # For W calculation
-    
+
     # Calculate the W_ij = (k² τᵢ τⱼ)^γ * (τᵢ τⱼ)^0.5 factor for un-weighting
     base_for_W_power = (k_to_plot**2) * tau_i_mesh * tau_j_mesh
     base_for_W_power[base_for_W_power <= 0] = 1e-100 # Avoid log(0) or power of negative
-    
+
     W_ij_unweight_factor = np.power(base_for_W_power, weighting_gamma_param) * np.sqrt(tau_i_mesh * tau_j_mesh)
     W_ij_unweight_factor[W_ij_unweight_factor == 0] = 1e-100 # Avoid division by zero
 
@@ -728,7 +626,7 @@ def plot_uetc_evecs_reconstruction(k_to_plot, tau_values, string_params_obj,
     if eigen_data['eigenvalues_S'] is not None and \
        eigen_data['eigenvectors_00'] is not None and \
        eigen_data['eigenvectors_S'] is not None:
-        
+
         lambda_S_modes = eigen_data['eigenvalues_S'][:actual_modes_for_reconstruction]
         lambda_00_modes = eigen_data['eigenvalues_00'][:actual_modes_for_reconstruction]
 
@@ -742,10 +640,10 @@ def plot_uetc_evecs_reconstruction(k_to_plot, tau_values, string_params_obj,
         M_00_reco_raw = M_00_weighted_sum / W_ij_unweight_factor.T # W_ij is ij, sum is ij (tau1, tau2)
         M_S_reco_raw  = M_S_weighted_sum  / W_ij_unweight_factor.T
         M_00S_reco_raw= M_00S_weighted_sum/ W_ij_unweight_factor.T
-        
+
         # Apply display scaling
         plot_display_scaling_mesh = np.sqrt(tau_i_mesh * tau_j_mesh) / mu_sq if mu_sq != 0 else np.zeros_like(tau_i_mesh)
-        
+
         reconstructed_correlator[0] = (M_00_reco_raw * plot_display_scaling_mesh).T
         reconstructed_correlator[1] = (M_S_reco_raw  * plot_display_scaling_mesh).T
         reconstructed_correlator[4] = (M_00S_reco_raw* plot_display_scaling_mesh).T
@@ -770,7 +668,7 @@ def plot_uetc_evecs_reconstruction(k_to_plot, tau_values, string_params_obj,
 
     # --- Plotting ---
     fig, axes = plt.subplots(5, 3, figsize=(18, 24), constrained_layout=True)
-    
+
     component_uetc_titles_orig = [
         r"Orig. Scaled $\langle \Theta_{00}\Theta_{00} \rangle$",
         r"Orig. Scaled $\langle \Theta_S\Theta_S \rangle$",
@@ -864,7 +762,7 @@ if __name__ == "__main__":
              num_modes_for_reconstruction=200,       # How many modes to use for UETC reconstruction
              uetc_n_levels=200
          )
-        
+
     # Compute correlator table
     print("--- Starting UETC Eigenvector Table Generation ---") # Modified print
     overall_start_time = time.time()
@@ -885,7 +783,7 @@ if __name__ == "__main__":
     all_eigenvalues_T = np.zeros((nk, nmodes), dtype=np.float64)
 
     tasks_args = [(k_val, SPRa, ktau_grid / k_val, weighting, nmodes) for k_val in k_grid]
-    
+
     num_workers = max(1, os.cpu_count() - 1 if os.cpu_count() else 1)
     print(f"Starting k-loop with {num_workers} workers for {nk} k-values (ntau={nktau} per k)...")
 
@@ -901,14 +799,14 @@ if __name__ == "__main__":
             processed_k_count += 1
             try:
                 _, data_for_k = future.result()
-                
+
                 if data_for_k and 'error' not in data_for_k:
                     # Store eigenfunctions as before
                     all_eigenfunctions[k_idx, 0, :, :] = data_for_k['eigenvectors_00']
                     all_eigenfunctions[k_idx, 1, :, :] = data_for_k['eigenvectors_S']
                     all_eigenfunctions[k_idx, 2, :, :] = data_for_k['eigenvectors_V']
                     all_eigenfunctions[k_idx, 3, :, :] = data_for_k['eigenvectors_T']
-                    
+
                     all_eigenvalues_S[k_idx, :] = data_for_k['eigenvalues_S']
                     all_eigenvalues_00[k_idx, :] = data_for_k['eigenvalues_00']
 
@@ -916,7 +814,7 @@ if __name__ == "__main__":
                     all_eigenvalues_T[k_idx, :] = data_for_k['eigenvalues_T']
 
                     current_k_val_for_deriv = k_grid[k_idx] # Use the actual k value from the grid
-                    
+
                     # Ensure k_val is positive before taking log
                     if current_k_val_for_deriv <= 0:
                         print(f"Warning: k_val <= 0 ({current_k_val_for_deriv}) at k_idx={k_idx}, cannot compute log(kτ). Skipnp.ping derivative.")
@@ -927,7 +825,7 @@ if __name__ == "__main__":
                         for type_idx_deriv in range(2): # 0 for evec_00, 1 for evec_S
                             for mode_idx_deriv in range(nmodes):
                                 eigenfunc_values_1d = all_eigenfunctions[k_idx, type_idx_deriv, mode_idx_deriv, :]
-                                
+
                                 if np.all(np.isnan(eigenfunc_values_1d)) or eigenfunc_values_1d.size < 2 : # Need at least 2 points for spline
                                     all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
                                     continue
@@ -936,10 +834,10 @@ if __name__ == "__main__":
                                     if np.sum(valid_indices) < 2: # Need at least 2 valid points
                                          all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
                                          continue
-                                    
+
                                     spl = scipy.interpolate.CubicSpline(log_ktau_axis[valid_indices], eigenfunc_values_1d[valid_indices], extrapolate=False)
                                     deriv_vals_on_grid = spl.derivative(nu=1)(log_ktau_axis) # Evaluate on original log_ktau grid points
-                                    
+
                                     all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = deriv_vals_on_grid
 
                                 except ValueError as ve:
@@ -966,7 +864,7 @@ if __name__ == "__main__":
                 print(f"Task for k={original_k_val:.4e} (index {k_idx}) generated an EXCEPTION: {exc}. {processed_k_count}/{nk} done.")
                 all_eigenfunctions[k_idx, :, :, :] = np.nan # Ensure main table is also NaN
                 all_eigenfunctions_d_dlogkt[k_idx, :, :, :] = np.nan
-            
+
             if processed_k_count % max(1, nk // 10) == 0 or processed_k_count == nk:
                  print(f"Progress: {processed_k_count}/{nk} k-values processed.")
 
@@ -981,24 +879,23 @@ if __name__ == "__main__":
     print(f"Total time: {overall_end_time - overall_start_time:.2f} seconds.")
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    NPZ_FILENAME = os.path.join(script_dir, "correlator_table.npz")    
+    NPZ_FILENAME = os.path.join(script_dir, "correlator_table.npz")
 
     try:
-        np.savez(NPZ_FILENAME, 
+        np.savez(NPZ_FILENAME,
                  k_grid=k_grid,
                  ktau_grid=ktau_grid,
                  eigenfunctions=all_eigenfunctions, # u_i(k,τ)
                  eigenfunctions_d_dlogkt=all_eigenfunctions_d_dlogkt, #du_i/d(log(kτ))
                  eigenvalues_S=all_eigenvalues_S,
                  eigenvalues_00=all_eigenvalues_00,
-                 eigenvalues_V=all_eigenvalues_V,  
-                 eigenvalues_T=all_eigenvalues_T,   
+                 eigenvalues_V=all_eigenvalues_V,
+                 eigenvalues_T=all_eigenvalues_T,
                  string_params_mu=SPRa.mu,
                  string_params_alpha=SPRa.alpha,
                  string_params_L=SPRa.L,
                  nmodes=nmodes,
                  weighting_gamma=weighting)
-        print("\nSaved data to correlator_table.npz") 
+        print("\nSaved data to correlator_table.npz")
     except Exception as e:
         print(f"\nError saving data to correlator_table.npz file: {e}")
-
