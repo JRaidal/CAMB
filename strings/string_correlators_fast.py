@@ -171,7 +171,7 @@ Date   : 2025‑07‑17
 import os, time, warnings, math
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, CubicSpline
 import scipy.linalg
 from numba import njit, prange
 from tqdm import tqdm                                   # Progress bar
@@ -384,8 +384,8 @@ def _get_correlator_pair(tau1, tau2, k,
         uetc_val[3]=termT * common_factor
         if x==0:
             term00S_num=0.0
-        else: term00S_num=(mu**2*(2+(-2+alpha**2)*v**2)*(-4+cosx+3*sinx_over_x+x*six))
-        term00S=term00S_num/(2.*k**2*norm_denom_etc) if norm_denom_etc>1e-12 else 0.0
+        else: term00S_num=((2+(-2+alpha**2)*v**2)*(-4+cosx+3*sinx_over_x+x*six))
+        term00S=term00S_num/(2) if norm_denom_etc>1e-12 else 0.0
         uetc_val[4]=term00S*common_factor
         return uetc_val
 
@@ -513,6 +513,45 @@ def eig_for_single_k(k_val, tau_grid, gamma=weighting_gamma, nmodes=nmodes):
     diag = _diagonalise(mats, tau_grid, k_val, gamma, nmodes)
     return diag
 
+@njit(parallel=True, cache=True, fastmath=True)
+def align_eigenvector_signs_numba(eigenfunctions, derivatives):
+    """
+    Aligns eigenvector signs across the k dimension for smoothness.
+    This function modifies the input arrays in-place.
+    """
+    nk, ntypes, nmodes, nktau = eigenfunctions.shape
+
+    # Process each eigenfunction type and mode independently and in parallel
+    for type_idx in prange(ntypes):
+        for mode_idx in range(nmodes):
+            # Iterate through k values, starting from the second one
+            for k_idx in range(1, nk):
+                v_prev = eigenfunctions[k_idx - 1, type_idx, mode_idx]
+                v_curr = eigenfunctions[k_idx,     type_idx, mode_idx]
+
+                # Simple check to avoid work if the previous vector is non-physical
+                is_prev_nan = True
+                for i in range(nktau):
+                    if not math.isnan(v_prev[i]):
+                        is_prev_nan = False
+                        break
+                if is_prev_nan:
+                    continue
+
+                # Calculate the dot product, carefully handling NaNs
+                dot_product = 0.0
+                for tau_idx in range(nktau):
+                    if not (math.isnan(v_curr[tau_idx]) or math.isnan(v_prev[tau_idx])):
+                        dot_product += v_curr[tau_idx] * v_prev[tau_idx]
+
+                # If the dot product is negative, the vectors are anti-aligned. Flip sign.
+                if dot_product < 0:
+                    eigenfunctions[k_idx, type_idx, mode_idx] *= -1.0
+                    derivatives[k_idx, type_idx, mode_idx]    *= -1.0
+
+    return eigenfunctions, derivatives
+
+
 # --------------------------------------------------------------------- #
 # Main table build loop – threaded, progress bar
 # --------------------------------------------------------------------- #
@@ -522,6 +561,8 @@ def build_table(filename="correlator_table_fast.npz"):
 
     ntypes   = 4
     efuncs   = np.zeros((nk, ntypes, nmodes, nktau))
+    efuncs_derivs = np.zeros_like(efuncs)
+
     evals_S  = np.zeros((nk, nmodes))
     evals_00 = np.zeros((nk, nmodes))
     evals_V  = np.zeros_like(evals_S)
@@ -529,29 +570,64 @@ def build_table(filename="correlator_table_fast.npz"):
 
     for ik, k in enumerate(tqdm(k_grid, desc="k‑loop", ncols=80)):
         tau_vec = ktau_grid / k
-        diag = eig_for_single_k(k, tau_vec)
+        try:
+            diag = eig_for_single_k(k, tau_vec)
 
-        efuncs[ik, 0] = diag['evec_00']
-        efuncs[ik, 1] = diag['evec_S']
-        efuncs[ik, 2] = diag['evec_V']
-        efuncs[ik, 3] = diag['evec_T']
+            efuncs[ik, 0] = diag['evec_00']
+            efuncs[ik, 1] = diag['evec_S']
+            efuncs[ik, 2] = diag['evec_V']
+            efuncs[ik, 3] = diag['evec_T']
 
-        evals_S [ik] = diag['eval_S']
-        evals_00[ik] = diag['eval_00']
-        evals_V [ik] = diag['eval_V']
-        evals_T [ik] = diag['eval_T']
+            evals_S [ik] = diag['eval_S']
+            evals_00[ik] = diag['eval_00']
+            evals_V [ik] = diag['eval_V']
+            evals_T [ik] = diag['eval_T']
+
+            log_ktau_axis = np.log(ktau_grid)
+            for type_idx in range(2):
+                for mode_idx in range(nmodes):
+                    eigenfunc_1d = efuncs[ik, type_idx, mode_idx, :]
+                    valid_mask = ~np.isnan(eigenfunc_1d)
+                    if np.sum(valid_mask) < 4:
+                        efuncs_derivs[ik, type_idx, mode_idx, :] = np.nan
+                        continue
+                    try:
+                        spl = CubicSpline(log_ktau_axis[valid_mask], eigenfunc_1d[valid_mask], extrapolate=False)
+                        derivs = spl.derivative(nu=1)(log_ktau_axis)
+                        efuncs_derivs[ik, type_idx, mode_idx, :] = derivs
+                    except Exception:
+                        efuncs_derivs[ik, type_idx, mode_idx, :] = np.nan
+
+            efuncs_derivs[ik, 2, :, :] = 0.0
+            efuncs_derivs[ik, 3, :, :] = 0.0
+
+        except Exception as e:
+            print(f"Error processing k={k:.4e}: {e}")
+            efuncs[ik, ...] = np.nan
+            efuncs_derivs[ik, ...] = np.nan
+            evals_S[ik, ...] = np.nan
+            evals_00[ik, ...] = np.nan
+            evals_V[ik, ...] = np.nan
+            evals_T[ik, ...] = np.nan
+
+    t_align_start = time.time()
+    print("\nAligning eigenvector signs across k-values...")
+    efuncs, efuncs_derivs = align_eigenvector_signs_numba(efuncs, efuncs_derivs)
+    print(f"Sign alignment complete. (took {time.time() - t_align_start:.2f}s)")
 
     np.savez(filename,
              k_grid=k_grid,
              ktau_grid=ktau_grid,
              eigenfunctions=efuncs,
+             eigenfunctions_d_dlogkt=efuncs_derivs,
              eigenvalues_S=evals_S,
              eigenvalues_00=evals_00,
              eigenvalues_V=evals_V,
              eigenvalues_T=evals_T,
-             string_mu=mu, string_alpha=alpha, string_L=L,
+             string_params_mu=mu, string_params_alpha=alpha, string_params_L=L,
              nmodes=nmodes, weighting_gamma=weighting_gamma)
-    print(f"Saved {filename}")
+    print(f"\nSaved aligned data to {filename}")
+
 
 # --------------------------------------------------------------------- #
 # Plotting function to visualize UETC results
@@ -844,25 +920,29 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    output_filepath = os.path.join(script_dir, args.filename)
+
     if args.plot_only:
         # Just plot existing results
-        print(f"Plotting existing results from {args.filename}")
+        print(f"Plotting existing results from {output_filepath}")
         try:
-            plot_uetc(args.filename)
+            plot_uetc(output_filepath)
         except Exception as e:
             print(f"Error plotting: {e}")
     else:
         # Generate table (and optionally plot)
         t0 = time.time()
         print("Generating UETC eigenmode table...")
-        build_table(args.filename)
+        build_table(output_filepath)
         elapsed = time.time() - t0
+        print(f"\n--- Table Generation Finished ---")
         print(f"Total wall time: {elapsed:.1f} s")
 
         if args.plot:
             print("\nGenerating plots...")
             try:
-                plot_uetc(args.filename)
+                plot_uetc(output_filepath)
             except Exception as e:
                 print(f"Error plotting: {e}")
-                print("You can plot later with: python string_correlators_fast.py --plot-only")
+                print(f"You can plot later with: python {os.path.basename(__file__)} --plot-only --filename {args.filename}")

@@ -307,9 +307,9 @@ def get_correlators(tau1, tau2, k, SPR_base):
         uetc_val[3]=termT * base_etc_factor
         if x==0:
             term00S_num=0.0
-        else: term00S_num=(mu**2*(2+(-2+alpha**2)*v**2)*(-4+cosx+3*sinx_over_x+x*six))
-        term00S=term00S_num/(2.*k**2*norm_denom_etc) if norm_denom_etc>1e-12 else 0.0
-        uetc_val[4]=term00S
+        else: term00S_num=((2+(-2+alpha**2)*v**2)*(-4+cosx+3*sinx_over_x+x*six))
+        term00S=term00S_num/(2.) if norm_denom_etc>1e-12 else 0.0
+        uetc_val[4]=term00S*base_etc_factor
         uetc_val *= sf; return np.nan_to_num(uetc_val)
 
     # --- Regime 3: General Case ---
