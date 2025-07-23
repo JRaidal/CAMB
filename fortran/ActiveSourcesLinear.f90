@@ -15,6 +15,7 @@ module ActiveSources
         integer                  :: nk = 0
         integer                  :: ntau = 0
 
+        !  Dimensions reordered for cache performance
         real(dl), allocatable    :: eigenfunctions_table(:,:,:,:)
         real(dl), allocatable    :: eigenfunc_derivs_table(:,:,:,:)
 
@@ -75,8 +76,8 @@ contains
         real(dl) :: ktau, common_scaling_corr, eigenvalue_k
         real(dl) :: u_00, u_S
         real(dl) :: du00_dlogkt, duS_dlogkt, dot_numerator_00, dot_numerator_S
-        real(dl) :: dot_terms_den
         integer :: eigenmode
+        integer :: k_idx, tau_idx
 
         emt00 = 0.0_dl; emtS = 0.0_dl; emt00dot = 0.0_dl; emtSdot = 0.0_dl
 
@@ -84,26 +85,28 @@ contains
         eigenmode = this%active_mode_idx
         ktau = k_val * tau_val
 
-        ! Perform interpolation directly from raw tables
-        u_00 = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunctions_table(:, 1, eigenmode, :))
-        u_S  = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunctions_table(:, 2, eigenmode, :))
-        eigenvalue_k = LinearInterp(k_val, this%k_grid, this%eigenvalues_S(:, eigenmode))
+        !  Find indices once
+        k_idx = find_lower_bound(this%k_grid, k_val)
+        tau_idx = find_lower_bound(this%tau_grid, ktau)
+
+        !  Pass indices and use contiguous slices
+        u_00 = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunctions_table(:, :, 1, eigenmode), k_idx, tau_idx)
+        u_S  = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunctions_table(:, :, 2, eigenmode), k_idx, tau_idx)
+        eigenvalue_k = LinearInterp(k_val, this%k_grid, this%eigenvalues_S(:, eigenmode), k_idx)
 
         common_scaling_corr = sqrt(abs(eigenvalue_k)) / ((ktau**this%weighting) * sqrt(tau_val))
         emt00 = u_00 * common_scaling_corr
         emtS = u_S * common_scaling_corr
 
-        ! Calculate derivatives using bilinear interpolation
-        du00_dlogkt = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunc_derivs_table(:, 1, eigenmode, :))
-        duS_dlogkt  = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunc_derivs_table(:, 2, eigenmode, :))
+        du00_dlogkt = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunc_derivs_table(:, :, 1, eigenmode), k_idx, tau_idx)
+        duS_dlogkt  = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunc_derivs_table(:, :, 2, eigenmode), k_idx, tau_idx)
 
         dot_numerator_00 = du00_dlogkt - (this%weighting + 0.5_dl) * u_00
         dot_numerator_S  = duS_dlogkt - (this%weighting + 0.5_dl) * u_S
 
-        dot_terms_den = tau_val
-        if (abs(dot_terms_den) > 1.0d-150) then
-            emt00dot = dot_numerator_00 * common_scaling_corr / dot_terms_den
-            emtSdot  = dot_numerator_S  * common_scaling_corr / dot_terms_den
+        if (abs(tau_val) > 1.0d-150) then
+            emt00dot = dot_numerator_00 * common_scaling_corr / tau_val
+            emtSdot  = dot_numerator_S  * common_scaling_corr / tau_val
         endif
 
     end subroutine TActiveSources_GetScalarSources
@@ -115,15 +118,19 @@ contains
 
         real(dl) :: ktau, common_scaling_corr, eigenvalue_k
         integer :: eigenmode
+        integer :: k_idx, tau_idx
         emtV = 0.0_dl
 
         if (this%active_mode_idx <= 0 .or. .not. this%tables_are_set) return
         eigenmode = this%active_mode_idx
         ktau = k_val * tau_val
 
-        eigenvalue_k = LinearInterp(k_val, this%k_grid, this%eigenvalues_V(:, eigenmode))
+        k_idx = find_lower_bound(this%k_grid, k_val)
+        tau_idx = find_lower_bound(this%tau_grid, ktau)
+
+        eigenvalue_k = LinearInterp(k_val, this%k_grid, this%eigenvalues_V(:, eigenmode), k_idx)
         common_scaling_corr = sqrt(abs(eigenvalue_k)) / ((ktau**this%weighting) * sqrt(tau_val))
-        emtV = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunctions_table(:, 3, eigenmode, :)) * common_scaling_corr
+        emtV = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunctions_table(:, :, 3, eigenmode), k_idx, tau_idx) * common_scaling_corr
 
     end subroutine TActiveSources_GetVectorSources
 
@@ -134,15 +141,19 @@ contains
 
         real(dl) :: ktau, common_scaling_corr, eigenvalue_k
         integer :: eigenmode
+        integer :: k_idx, tau_idx
         emtT = 0.0_dl
 
         if (this%active_mode_idx <= 0 .or. .not. this%tables_are_set) return
         eigenmode = this%active_mode_idx
         ktau = k_val * tau_val
 
-        eigenvalue_k = LinearInterp(k_val, this%k_grid, this%eigenvalues_T(:, eigenmode))
+        k_idx = find_lower_bound(this%k_grid, k_val)
+        tau_idx = find_lower_bound(this%tau_grid, ktau)
+
+        eigenvalue_k = LinearInterp(k_val, this%k_grid, this%eigenvalues_T(:, eigenmode), k_idx)
         common_scaling_corr = sqrt(abs(eigenvalue_k)) / ((ktau**this%weighting) * sqrt(tau_val))
-        emtT = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunctions_table(:, 4, eigenmode, :)) * common_scaling_corr
+        emtT = BilinearInterp(k_val, ktau, this%k_grid, this%tau_grid, this%eigenfunctions_table(:, :, 4, eigenmode), k_idx, tau_idx) * common_scaling_corr
 
     end subroutine TActiveSources_GetTensorSources
 
@@ -165,8 +176,7 @@ contains
         real(dl), intent(in)               :: eigenfunc_derivs_logkt_flat_in(*)
         real(dl), intent(in)               :: evals_S_flat_in(*),evals_00_flat_in(*), evals_V_flat_in(*), evals_T_flat_in(*)
         real(dl), intent(in)               :: mu_in, weighting_param_in
-
-        integer :: i, j, l, m, idx_flat
+        integer :: total_elements_main, total_elements_evals
 
         call DeallocateCorrelatorTable(this)
         this%tables_are_set = .false.
@@ -174,6 +184,7 @@ contains
         this%nk = nk_in; this%ntau = ntau_in
         this%nmodes = nmodes_in; this%ntypes = num_eigen_types_in
         this%string_mu = mu_in; this%weighting = weighting_param_in
+
 
         print *, "Fortran TActiveSources_SetCorrelatorTable: Received nk=", this%nk, ", ntau=", this%ntau, &
                  ", ntypes=", this%ntypes, ", nmodes=", this%nmodes
@@ -187,35 +198,25 @@ contains
         allocate(this%k_grid(this%nk)); this%k_grid = k_grid_in
         allocate(this%tau_grid(this%ntau)); this%tau_grid = tau_grid_in
 
-        ! --- THIS IS THE CORRECTED SECTION ---
-        ! Manually reshape the flat arrays into the multi-dimensional tables
-        allocate(this%eigenfunctions_table(this%nk, this%ntypes, this%nmodes, this%ntau))
-        allocate(this%eigenfunc_derivs_table(this%nk, this%ntypes, this%nmodes, this%ntau))
+        !  Allocate with new dimension order and reshape directly
+        allocate(this%eigenfunctions_table(this%nk, this%ntau, this%ntypes, this%nmodes))
+        allocate(this%eigenfunc_derivs_table(this%nk, this%ntau, this%ntypes, this%nmodes))
 
-        do i = 1, this%nk      ! k_index
-            do j = 1, this%ntypes  ! type_index
-                do l = 1, this%nmodes  ! mode_index
-                    do m = 1, this%ntau ! tau_index
-                        ! This indexing assumes Fortran-style ('F') ordering from the calling language (e.g. numpy.flatten(order='F'))
-                        idx_flat = ((((i-1) * this%ntypes + (j-1)) * this%nmodes + (l-1)) * this%ntau + m-1) + 1
-                        this%eigenfunctions_table(i, j, l, m) = eigenfuncs_flat_in(idx_flat)
-                        this%eigenfunc_derivs_table(i, j, l, m) = eigenfunc_derivs_logkt_flat_in(idx_flat)
-                    end do
-                end do
-            end do
-        end do
-        ! --- END OF CORRECTION ---
+        total_elements_main = this%nk * this%ntau * this%ntypes * this%nmodes
+        this%eigenfunctions_table = reshape(eigenfuncs_flat_in(1:total_elements_main), [this%nk, this%ntau, this%ntypes, this%nmodes])
+        this%eigenfunc_derivs_table = reshape(eigenfunc_derivs_logkt_flat_in(1:total_elements_main), [this%nk, this%ntau, this%ntypes, this%nmodes])
 
-        ! Store raw eigenvalues
         allocate(this%eigenvalues_S(this%nk, this%nmodes))
         allocate(this%eigenvalues_00(this%nk, this%nmodes))
         allocate(this%eigenvalues_V(this%nk, this%nmodes))
         allocate(this%eigenvalues_T(this%nk, this%nmodes))
 
-        this%eigenvalues_S  = transpose(reshape(evals_S_flat_in(1:this%nk*this%nmodes), [this%nmodes, this%nk]))
-        this%eigenvalues_00 = transpose(reshape(evals_00_flat_in(1:this%nk*this%nmodes), [this%nmodes, this%nk]))
-        this%eigenvalues_V  = transpose(reshape(evals_V_flat_in(1:this%nk*this%nmodes), [this%nmodes, this%nk]))
-        this%eigenvalues_T  = transpose(reshape(evals_T_flat_in(1:this%nk*this%nmodes), [this%nmodes, this%nk]))
+        total_elements_evals = this%nk * this%nmodes
+        this%eigenvalues_S  = reshape(evals_S_flat_in(1:total_elements_evals), [this%nk, this%nmodes])
+        this%eigenvalues_00 = reshape(evals_00_flat_in(1:total_elements_evals), [this%nk, this%nmodes])
+        this%eigenvalues_V  = reshape(evals_V_flat_in(1:total_elements_evals), [this%nk, this%nmodes])
+        this%eigenvalues_T  = reshape(evals_T_flat_in(1:total_elements_evals), [this%nk, this%nmodes])
+
 
         print *, "Fortran SetCorrelatorTable: Raw data tables (functions, derivatives, eigenvalues) stored."
         this%tables_are_set = .true.
@@ -250,62 +251,47 @@ contains
     end subroutine TActiveSources_SetCorrelatorTable
 
     ! ---------------------------------------------------------------------------------
-    ! NEW INTERPOLATION FUNCTIONS
+    ! INTERPOLATION FUNCTIONS
     ! ---------------------------------------------------------------------------------
 
-    ! Performs fast 2D bilinear interpolation on a pre-loaded grid.
-    function BilinearInterp(x, y, x_grid, y_grid, grid_data) result(val)
+    !  Accept pre-calculated indices
+    pure function BilinearInterp(x, y, x_grid, y_grid, grid_data, i, j) result(val)
         implicit none
         real(dl), intent(in) :: x, y
         real(dl), intent(in) :: x_grid(:), y_grid(:)
         real(dl), intent(in) :: grid_data(:,:)
+        integer, intent(in)  :: i, j
         real(dl)             :: val
-
-        integer :: i, j
         real(dl) :: t, u
-        real(dl) :: f_i_j, f_ip1_j, f_i_jp1, f_ip1_jp1
-
-        i = find_lower_bound(x_grid, x)
-        j = find_lower_bound(y_grid, y)
 
         t = (x - x_grid(i)) / (x_grid(i+1) - x_grid(i))
         u = (y - y_grid(j)) / (y_grid(j+1) - y_grid(j))
 
-        f_i_j     = grid_data(i,   j)
-        f_ip1_j   = grid_data(i+1, j)
-        f_i_jp1   = grid_data(i,   j+1)
-        f_ip1_jp1 = grid_data(i+1, j+1)
-
-        val = f_i_j * (1.0_dl - t) * (1.0_dl - u) + &
-              f_ip1_j * t * (1.0_dl - u) + &
-              f_i_jp1 * (1.0_dl - t) * u + &
-              f_ip1_jp1 * t * u
+        val = grid_data(i,   j) * (1.0_dl - t) * (1.0_dl - u) + &
+              grid_data(i+1, j) * t * (1.0_dl - u) + &
+              grid_data(i,   j+1) * (1.0_dl - t) * u + &
+              grid_data(i+1, j+1) * t * u
     end function BilinearInterp
 
-    ! Performs fast 1D linear interpolation.
-    function LinearInterp(x, x_grid, y_values) result(val)
+    !  Accept pre-calculated index
+    pure function LinearInterp(x, x_grid, y_values, i) result(val)
         implicit none
         real(dl), intent(in) :: x
         real(dl), intent(in) :: x_grid(:), y_values(:)
+        integer, intent(in)  :: i
         real(dl)             :: val
-
-        integer :: i
         real(dl) :: t
-
-        i = find_lower_bound(x_grid, x)
 
         t = (x - x_grid(i)) / (x_grid(i+1) - x_grid(i))
 
         val = y_values(i) * (1.0_dl - t) + y_values(i+1) * t
     end function LinearInterp
 
-    ! Efficiently finds the lower index of a value in a sorted array.
-    function find_lower_bound(arr, val) result(idx)
+    pure function find_lower_bound(arr, val) result(idx)
         implicit none
         real(dl), intent(in) :: arr(:)
         real(dl), intent(in) :: val
         integer              :: idx
-
         integer :: n, low, high, mid
         n = size(arr)
 
@@ -330,7 +316,6 @@ contains
         end do
         idx = low - 1
     end function find_lower_bound
-
 
     ! ---------------------------------------------------------------------------------
     ! PYTHON INTERFACE (No changes needed here)
