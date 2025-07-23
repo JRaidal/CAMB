@@ -40,15 +40,16 @@ class ActiveSources(BaseClass):
         # We pass arrays as flat and restructure them in fortran
         k_grid_c = np.ascontiguousarray(k_grid, dtype=np.float64)
         tau_grid_c = np.ascontiguousarray(tau_grid, dtype=np.float64)
-        eigenfunctions_flat_c = np.ascontiguousarray(eigenfunctions, dtype=np.float64).ravel(order='C')
 
-        eigenfunctions_derivs_flat_c = np.ascontiguousarray(eigenfunctions_d_dlogkt, dtype=np.float64).ravel(order='C')
+        # OPTIMIZATION: Transpose and flatten in Fortran order to match Fortran's cache-optimized layout.
+        eigenfunctions_flat_c = np.asfortranarray(np.transpose(eigenfunctions, (0, 3, 1, 2)), dtype=np.float64).ravel(order='F')
+        eigenfunctions_derivs_flat_c = np.asfortranarray(np.transpose(eigenfunctions_d_dlogkt, (0, 3, 1, 2)), dtype=np.float64).ravel(order='F')
 
-        eigenvalues_S_flat_c = np.ascontiguousarray(eigenvalues_S, dtype=np.float64).ravel(order='C')
-        eigenvalues_00_flat_c = np.ascontiguousarray(eigenvalues_00, dtype=np.float64).ravel(order='C')
+        eigenvalues_S_flat_c = np.asfortranarray(eigenvalues_S, dtype=np.float64).ravel(order='F')
+        eigenvalues_00_flat_c = np.asfortranarray(eigenvalues_00, dtype=np.float64).ravel(order='F')
 
-        eigenvalues_V_flat_c = np.ascontiguousarray(eigenvalues_V, dtype=np.float64).ravel(order='C')
-        eigenvalues_T_flat_c = np.ascontiguousarray(eigenvalues_T, dtype=np.float64).ravel(order='C')
+        eigenvalues_V_flat_c = np.asfortranarray(eigenvalues_V, dtype=np.float64).ravel(order='F')
+        eigenvalues_T_flat_c = np.asfortranarray(eigenvalues_T, dtype=np.float64).ravel(order='F')
 
         nk = k_grid_c.shape[0]
         ntau = tau_grid_c.shape[0]
