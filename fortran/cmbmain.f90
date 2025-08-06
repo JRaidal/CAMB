@@ -2236,8 +2236,12 @@
             dlnks(q_ix) = CTrans%q%dpoints(q_ix)*CTrans%q%points(q_ix)/ks(q_ix)**2
         end if
 !         pows(q_ix) = CP%InitPower%ScalarPower(ks(q_ix))
-        if (CP%ActiveSources%active_mode_idx > 0) then
-            pows(q_ix) = 1/(2*const_pi**2) * ks(q_ix)**3
+        if (allocated(CP%ActiveSources)) then
+            if (CP%ActiveSources%active_mode_idx > 0) then
+                pows(q_ix) = 1/(2*const_pi**2) * ks(q_ix)**3
+            else
+               pows(q_ix) = CP%InitPower%ScalarPower(ks(q_ix))
+            endif
         else
            pows(q_ix) = CP%InitPower%ScalarPower(ks(q_ix))
         endif
@@ -2412,8 +2416,12 @@
         end if
 
 !         pows(q_ix) =  CP%InitPower%ScalarPower(ks(q_ix))
-        if (CP%ActiveSources%active_mode_idx > 0) then
-            pows(q_ix) = 1/(2*const_pi**2) * ks(q_ix)**3
+        if (allocated(CP%ActiveSources)) then
+            if (CP%ActiveSources%active_mode_idx > 0) then
+                pows(q_ix) = 1/(2*const_pi**2) * ks(q_ix)**3
+            else
+               pows(q_ix) = CP%InitPower%ScalarPower(ks(q_ix))
+            endif
         else
            pows(q_ix) = CP%InitPower%ScalarPower(ks(q_ix))
         endif
@@ -2495,11 +2503,13 @@
     call GetInitPowers(pows,ks,CTrans%q%npoints)
 
     !$OMP PARALLEL DO DEFAULT(SHARED),SCHEDULE(STATIC,4) &
-    !$OMP & PRIVATE(q_ix, measure, apowert, ctnorm, dbletmp)
+        !$OMP & PRIVATE(q_ix, measure, apowert, ctnorm, dbletmp)
     do j=1,CTrans%ls%nl
         do q_ix = 1, CTrans%q%npoints
-            if (CP%ActiveSources%active_mode_idx > 0) then
-                pows(q_ix) = 16/(2*const_pi**2) * ks(q_ix)**3
+            if (allocated(CP%ActiveSources)) then
+                if (CP%ActiveSources%active_mode_idx > 0) then
+                    pows(q_ix) = 16/(2*const_pi**2) * ks(q_ix)**3
+                endif
             endif
             if (.not.(State%closed.and. nint(CTrans%q%points(q_ix)*State%curvature_radius)<=CTrans%ls%l(j))) then
                 !cut off at nu = l+1
@@ -2540,12 +2550,18 @@
         ks(q_ix) = CTrans%q%points(q_ix)
         measures(q_ix) = CTrans%q%dpoints(q_ix)/CTrans%q%points(q_ix)
 
-        if (CP%ActiveSources%active_mode_idx > 0) then
-            pows(q_ix) = 8/(2*const_pi**2) * ks(q_ix)**3
+        if (allocated(CP%ActiveSources)) then
+            if (CP%ActiveSources%active_mode_idx > 0) then
+                pows(q_ix) = 8/(2*const_pi**2) * ks(q_ix)**3
+            endif
         endif
     end do
 
-    if (CP%ActiveSources%active_mode_idx == 0) then
+    if (allocated(CP%ActiveSources)) then
+        if (CP%ActiveSources%active_mode_idx == 0) then
+            call GetInitPowers(pows,ks,CTrans%q%npoints)
+        endif
+    else
         call GetInitPowers(pows,ks,CTrans%q%npoints)
     endif
 

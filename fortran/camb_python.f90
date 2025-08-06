@@ -434,9 +434,13 @@
             tot_scalar_cls(1:4,l) = tot_scalar_cls(1:4,l) &
                 + Data%CLData%Cl_tensor(l, CT_Temp:CT_Cross)
         end if
-        if (Data%CP%ActiveSources%active_mode_idx > 0 .and. Data%CP%WantVectors .and. l <= Data%CP%Max_l) then
-            tot_scalar_cls(1:4,l) = tot_scalar_cls(1:4,l) &
-                + Data%CLData%Cl_vector(l, CT_Temp:CT_Cross)
+        if (Data%CP%WantVectors .and. l <= Data%CP%Max_l) then
+            if (allocated(Data%CP%ActiveSources)) then
+                if (Data%CP%ActiveSources%active_mode_idx > 0) then
+                    tot_scalar_cls(1:4,l) = tot_scalar_cls(1:4,l) &
+                        + Data%CLData%Cl_vector(l, CT_Temp:CT_Cross)
+                endif
+            endif
         end if
     end do
 

@@ -1928,12 +1928,23 @@
     end if
 
 
-    if (CP%ActiveSources%active_mode_idx > 0) then
-        !InitVec = initv(CP%Scalar_initial_condition,:)
-        InitVec = 0
-        if (CP%Scalar_initial_condition==initial_adiabatic) InitVec = -InitVec
+    if (allocated(CP%ActiveSources)) then
+        if (CP%ActiveSources%active_mode_idx > 0) then
+            InitVec = 0
+        else
+            ! This block is for when ActiveSources IS allocated but inactive.
+            if (CP%Scalar_initial_condition==initial_vector) then
+                InitVec = 0
+                do i=1,initial_nummodes
+                    InitVec = InitVec+ initv(i,:)*CP%InitialConditionVector(i)
+                end do
+            else
+                InitVec = initv(CP%Scalar_initial_condition,:)
+                if (CP%Scalar_initial_condition==initial_adiabatic) InitVec = -InitVec
+            end if
+        endif
     else
-
+        ! This block is for when ActiveSources is NOT allocated.
         if (CP%Scalar_initial_condition==initial_vector) then
             InitVec = 0
             do i=1,initial_nummodes
@@ -1942,9 +1953,7 @@
         else
             InitVec = initv(CP%Scalar_initial_condition,:)
             if (CP%Scalar_initial_condition==initial_adiabatic) InitVec = -InitVec
-            !So we start with chi=-1 as before
         end if
-
     end if
 
     y(ix_etak)= -InitVec(i_eta)*k/2
@@ -2064,8 +2073,10 @@
 
     tens0 = 1
 
-    if (CP%ActiveSources%active_mode_idx > 0) then
-        tens0=0.0
+    if (allocated(CP%ActiveSources)) then
+        if (CP%ActiveSources%active_mode_idx > 0) then
+            tens0=0.0d0
+        end if
     end if
 
     yt(ixt_H)= tens0
@@ -2103,9 +2114,11 @@
     real(dl) k,k2 ,a, omtau
     real(dl) yv(EV%nvarv)
 
-    if (CP%ActiveSources%active_mode_idx > 0) then
-        vec_sig0=0.0
-        Magnetic = 0.0
+    if (allocated(CP%ActiveSources)) then
+        if (CP%ActiveSources%active_mode_idx > 0) then
+            vec_sig0=0.0d0
+            Magnetic = 0.0d0
+        end if
     end if
 
     if (State%flat) then
@@ -2294,8 +2307,14 @@
             call CP%ActiveSources%GetScalarSources(EV%k_buf, tau, emt00, emtS, emt00dot, emtSdot)
             emtD = ay(EV%s_ix)
             emtP = (emtD - emt00dot)/adotoa - emt00
-            ayprime(EV%s_ix)=-2.0d0*adotoa*emtD-(k2/3.0d0)*(emtP+2.0d0*emtS)
+            ayprime(EV%s_ix) = -2.0d0*adotoa*emtD - (k2/3.0d0)*(emtP+2.0d0*emtS)
+        else
+            ! Case where sources are allocated but inactive. Derivative is zero.
+            ayprime(EV%s_ix) = 0.0d0
         endif
+    else
+        ! Case where sources are NOT allocated. Derivative is zero.
+        ayprime(EV%s_ix) = 0.0d0
     endif
 
     if (EV%no_nu_multpoles) then
