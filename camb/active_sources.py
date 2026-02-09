@@ -35,7 +35,7 @@ class ActiveSources(BaseClass):
                               eigenfunctions_d_dlogkt,
                               eigenvalues_S,eigenvalues_00, eigenvalues_V, eigenvalues_T,
                               string_params_mu, nmodes_param, weighting_param):
-        print("Python: Preparing eigenvector table for Fortran...")
+        # print("Python: Preparing eigenvector table for Fortran...")
         # NOTE! For some reason only passing flat contiguous arrays seems to be allowed (at least only these are allowed easily)
         # We pass arrays as flat and restructure them in fortran
         k_grid_c = np.ascontiguousarray(k_grid, dtype=np.float64)
@@ -55,7 +55,7 @@ class ActiveSources(BaseClass):
         ntau = tau_grid_c.shape[0]
         num_eigen_types = eigenfunctions.shape[1]
 
-        print(f"  Python Sending: nk={nk}, ntau={ntau}, Ntypes={num_eigen_types}, Nmodes={nmodes_param}")
+        # print(f"  Python Sending: nk={nk}, ntau={ntau}, Ntypes={num_eigen_types}, Nmodes={nmodes_param}")
 
         self.f_SetCorrelatorTable(
             k_grid_c, byref(c_int(nk)),
@@ -71,13 +71,13 @@ class ActiveSources(BaseClass):
             byref(c_double(string_params_mu)),
             byref(c_double(weighting_param))
         )
-        print("Python: Fortran call to SetcorrelatorTable completed.")
+        # print("Python: Fortran call to SetcorrelatorTable completed.")
         return self
 
     def set_active_eigenmode(self, mode_idx):
             if not isinstance(mode_idx, int):
                 raise TypeError("mode_idx must be an integer.")
 
-            print(f"Python: Setting active correlator eigenmode to: {mode_idx}")
+            # print(f"Python: Setting active correlator eigenmode to: {mode_idx}")
             self.f_SetActiveEigenmode(byref(c_int(mode_idx)))
             return self

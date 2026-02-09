@@ -57,13 +57,13 @@ contains
         if (mode_to_set >= 0 .and. (mode_to_set == 0 .or. mode_to_set <= this%nmodes) ) then
             this%active_mode_idx = mode_to_set
             if (mode_to_set > 0) then
-                print *, "Fortran TActiveSources: Active UETC eigenmode set to: ", this%active_mode_idx
+                ! print *, "Fortran TActiveSources: Active UETC eigenmode set to: ", this%active_mode_idx
             else
-                print *, "Fortran TActiveSources: UETC sources turned OFF (active_mode_idx = 0)."
+                ! print *, "Fortran TActiveSources: UETC sources turned OFF (active_mode_idx = 0)."
             endif
         else
-            print *, "Fortran TActiveSources Warning: Invalid active_mode_idx requested: ", mode_to_set, &
-                     " Max modes available: ", this%nmodes, ". Setting to 0 (OFF)."
+            ! print *, "Fortran TActiveSources Warning: Invalid active_mode_idx requested: ", mode_to_set, &
+            !          " Max modes available: ", this%nmodes, ". Setting to 0 (OFF)."
             this%active_mode_idx = 0
         endif
     end subroutine TActiveSources_SetActiveEigenmode
@@ -186,8 +186,8 @@ contains
         this%string_mu = mu_in; this%weighting = weighting_param_in
 
 
-        print *, "Fortran TActiveSources_SetCorrelatorTable: Received nk=", this%nk, ", ntau=", this%ntau, &
-                 ", ntypes=", this%ntypes, ", nmodes=", this%nmodes
+        ! print *, "Fortran TActiveSources_SetCorrelatorTable: Received nk=", this%nk, ", ntau=", this%ntau, &
+        !          ", ntypes=", this%ntypes, ", nmodes=", this%nmodes
 
         if (this%nk < 2 .or. this%ntau < 2 .or. this%nmodes <= 0 .or. this%ntypes /= 4) then
             print *, "Fortran SetCorrelatorTable: Insufficient dimensions. Aborting setup."
@@ -218,7 +218,7 @@ contains
         this%eigenvalues_T  = reshape(evals_T_flat_in(1:total_elements_evals), [this%nk, this%nmodes])
 
 
-        print *, "Fortran SetCorrelatorTable: Raw data tables (functions, derivatives, eigenvalues) stored."
+        ! print *, "Fortran SetCorrelatorTable: Raw data tables (functions, derivatives, eigenvalues) stored."
         this%tables_are_set = .true.
 
     contains

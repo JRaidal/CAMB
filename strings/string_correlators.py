@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-
 #This code calculates the two-point correlators for cosmic strings based on the unconnected segment model
 #and using analytic integrals (and approximations) as detailed in https://arxiv.org/pdf/1209.2461 and https://arxiv.org/pdf/1603.01275
 
@@ -12,6 +11,7 @@
 import os
 import warnings
 import time
+import math # Added for Numba compatibility
 import matplotlib.pyplot as plt
 
 #Calculation imports
@@ -22,10 +22,11 @@ import scipy.interpolate
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
-from integrals import I1_int, I2_int, I3_int, I4_int, I5_int, I6_int, I1_int_a, I4_int_a
+# Numba imports for acceleration
+from numba import njit, prange
 
-#Parallelization of k-loops
-import concurrent.futures
+from integrals import I1_int_numba, I2_int_numba, I3_int_numba, I4_int_numba, I5_int_numba, I6_int_numba, I1_int_a_numba, I4_int_a_numba, sici_numba
+
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -46,14 +47,10 @@ c_m_per_s = 299792458.0
 hH = 0.673
 H0 = (100 * 1000 * hH) / c_m_per_s # H0 is now in units of Mpc^-1
 
-
 # ======================================================
 # Parameters for correlator calculations
 # ======================================================
 
-# string_tension=2.0e-7 #Gmu
-# string_wigglyness=1.9
-# string_decay=0.99
 string_tension=1.0 #Gmu
 string_wigglyness=1.9
 string_decay=0.95
@@ -185,46 +182,55 @@ def VOS_solver(cr=0.23):
     xi_interp = interp1d(tau_eval, xi, kind='linear', fill_value="extrapolate")
     v_interp = interp1d(tau_eval, v, kind='linear', fill_value="extrapolate")
 
-    return xi_interp, v_interp
+    # Return raw arrays as well for Numba lookup
+    return xi_interp, v_interp, tau_eval, xi, v
 
 #Call solver to use in correlator calculations
-xi_interp, v_interp = VOS_solver()
+xi_interp, v_interp, vos_tau_arr, vos_xi_arr, vos_v_arr = VOS_solver()
 
 
 # ========================================================================
 # Some numerical helpers
 # ========================================================================
 
-def sine_integral(x): si, _ = sp.sici(x); return si
+@njit(inline='always')
+def _lookup(arr, tau, tau_grid):
+    """ Fast linear interpolation for Numba """
+    idx = np.searchsorted(tau_grid, tau) - 1
+    if idx < 0: return arr[0]
+    if idx >= len(tau_grid) - 1: return arr[-1]
+    w = (tau - tau_grid[idx]) / (tau_grid[idx+1] - tau_grid[idx])
+    return (1 - w) * arr[idx] + w * arr[idx+1]
 
 # ========================================================================
 # Correlator calculation
 # ========================================================================
 
 # Decay scaling factor
-def scaling_factor(tau1, tau2, xi1, xi2, L):
-    if scaling_option == 1: return 1.0
-    elif scaling_option == 2: denom = max(xi1 * tau1, xi2 * tau2, 1e-30); return 1.0 / (denom**3)
+@njit(fastmath=True, cache=True)
+def scaling_factor(tau1, tau2, xi1, xi2, L, option):
+    if option == 1: return 1.0
+    elif option == 2: 
+        denom = max(xi1 * tau1, xi2 * tau2, 1e-30)
+        return 1.0 / (denom**3)
     else: return 1.0
 
-
-def get_correlators(tau1, tau2, k, SPR_base):
+# Numba version of get_correlators
+@njit(fastmath=True, cache=True)
+def get_correlators(tau1, tau2, k, mu, alpha, L, vos_tau, vos_xi, vos_v):
     """
     Main function that calculates the string two-point correlators. Note that these expressions
     differ slightly from those presented in the papers, as there is functionality to include two different
-    populations of strings (hence parameters1 and parameters2), although this is not used.
-
+    populations of strings, although this is not used.
     """
-    # Call parameters
-    uetc_val = np.zeros(5); parameters1 = SPRa; parameters2 = SPRa
-    alpha1=parameters1.alpha; alpha2=parameters2.alpha; mu1=parameters1.mu; mu2=parameters2.mu
-    L_decay = parameters1.L
-
-    # Use interpolators calculated before to find VOS parameter values.
-    v1=v_interp(tau1)
-    xi1=xi_interp(tau1)
-    v2=v_interp(tau2)
-    xi2=xi_interp(tau2)
+    # Initialize result array
+    uetc_val = np.zeros(5, dtype=np.float64)
+    
+    # Use lookup to find VOS parameter values
+    v1 = _lookup(vos_v, tau1, vos_tau)
+    xi1 = _lookup(vos_xi, tau1, vos_tau)
+    v2 = _lookup(vos_v, tau2, vos_tau)
+    xi2 = _lookup(vos_xi, tau2, vos_tau)
 
     # Find x and rho as in paper
     x1=k*tau1*xi1; x2=k*tau2*xi2; xp=(x1+x2)/2.0; xm=(x1-x2)/2.0
@@ -232,43 +238,47 @@ def get_correlators(tau1, tau2, k, SPR_base):
 
     # Common factors for all correlators
     norm_denom_sq = (1.0 - v1**2)*(1.0 - v2**2)
-    norm_denom = np.sqrt(norm_denom_sq)
-    sf = scaling_factor(tau1, tau2, xi1, xi2, L_decay)
+    norm_denom = math.sqrt(norm_denom_sq)
+    
+    sf = scaling_factor(tau1, tau2, xi1, xi2, L, 2)
+    
     common_factor_base = sf / (k**2*norm_denom)
-    common_factor = mu1*mu2*common_factor_base
+    common_factor = mu*mu*common_factor_base
 
     # --- Regime 1: Small x---
     if x1 <= xmin and x2 <= xmin:
-        if alpha1==0 or alpha2==0: return uetc_val
-        term00=-(alpha1*alpha2*mu1*mu2*(-6.0 + rho**2)*x1*x2)/(6.0*k**2*norm_denom)
-        term_s_num=(rho**2*(-10.0+(10.0-11.0*alpha2**2)*v2**2+v1**2*(10.0-11.0*alpha1**2+(-10.0+11.0*alpha1**2+11.0*(1.0-2.0*alpha1**2)*alpha2**2)*v2**2))+42.0*(2.0+(-2.0+alpha2**2)*v2**2+v1**2*(-2.0+alpha1**2+(2.0-alpha1**2+(-1.0+2.0*alpha1**2)*alpha2**2)*v2**2)))*x1*x2
-        termS=(mu1*mu2*term_s_num)/(420.0*alpha1*alpha2*k**2*norm_denom) if alpha1*alpha2 != 0 else 0.0
-        term_v_num=(8.0+4.0*(-2.0+alpha1**2)*v1**2+(-8.0-4.0*(-2.0+alpha1**2)*v1**2+alpha2**2*(4.0+(-4.0+7.0*alpha1**2)*v1**2))*v2**2)*x1*x2
-        termV=(mu1*mu2*2.3*term_v_num)/(256.0*alpha1*alpha2*k**2*norm_denom) if alpha1*alpha2 != 0 else 0.0
-        term_t_num=-(mu1*mu2*(-28.0+6.0*rho**2+28.0*v1**2-14.0*alpha1**2*v1**2-6.0*rho**2*v1**2+alpha1**2*rho**2*v1**2+28.0*v2**2-14.0*alpha2**2*v2**2-6.0*rho**2*v2**2+alpha2**2*rho**2*v2**2-28.0*v1**2*v2**2+14.0*alpha1**2*v1**2*v2**2+14.0*alpha2**2*v1**2*v2**2-28.0*alpha1**2*alpha2**2*v1**2*v2**2+6.0*rho**2*v1**2*v2**2-alpha1**2*rho**2*v1**2*v2**2-alpha2**2*rho**2*v1**2*v2**2+2.0*alpha1**2*alpha2**2*rho**2*v1**2*v2**2)*x1*x2)
-        termT=term_t_num/(420.0*alpha1*alpha2*k**2*norm_denom) if alpha1*alpha2 != 0 else 0.0
-        term_cross_num=-(mu1*mu2*rho**2*(alpha1**2*(1.0+(-1.0+2.0*alpha2**2)*v2**2)+alpha2**2*(1.0+(-1.0+2.0*alpha1**2)*v1**2))*x1*x2)
-        term00S=term_cross_num/(60.0*alpha1*alpha2*k**2*norm_denom) if alpha1*alpha2 != 0 else 0.0
+        if alpha==0 or alpha==0: return uetc_val
+        term00=-(alpha*alpha*mu*mu*(-6.0 + rho**2)*x1*x2)/(6.0*k**2*norm_denom)
+        term_s_num=(rho**2*(-10.0+(10.0-11.0*alpha**2)*v2**2+v1**2*(10.0-11.0*alpha**2+(-10.0+11.0*alpha**2+11.0*(1.0-2.0*alpha**2)*alpha**2)*v2**2))+42.0*(2.0+(-2.0+alpha**2)*v2**2+v1**2*(-2.0+alpha**2+(2.0-alpha**2+(-1.0+2.0*alpha**2)*alpha**2)*v2**2)))*x1*x2
+        termS=(mu*mu*term_s_num)/(420.0*alpha*alpha*k**2*norm_denom) if alpha*alpha != 0 else 0.0
+        term_v_num=(8.0+4.0*(-2.0+alpha**2)*v1**2+(-8.0-4.0*(-2.0+alpha**2)*v1**2+alpha**2*(4.0+(-4.0+7.0*alpha**2)*v1**2))*v2**2)*x1*x2
+        termV=(mu*mu*2.3*term_v_num)/(256.0*alpha*alpha*k**2*norm_denom) if alpha*alpha != 0 else 0.0
+        term_t_num=-(mu*mu*(-28.0+6.0*rho**2+28.0*v1**2-14.0*alpha**2*v1**2-6.0*rho**2*v1**2+alpha**2*rho**2*v1**2+28.0*v2**2-14.0*alpha**2*v2**2-6.0*rho**2*v2**2+alpha**2*rho**2*v2**2-28.0*v1**2*v2**2+14.0*alpha**2*v1**2*v2**2+14.0*alpha**2*v1**2*v2**2-28.0*alpha**2*alpha**2*v1**2*v2**2+6.0*rho**2*v1**2*v2**2-alpha**2*rho**2*v1**2*v2**2-alpha**2*rho**2*v1**2*v2**2+2.0*alpha**2*alpha**2*rho**2*v1**2*v2**2)*x1*x2)
+        termT=term_t_num/(420.0*alpha*alpha*k**2*norm_denom) if alpha*alpha != 0 else 0.0
+        term_cross_num=-(mu*mu*rho**2*(alpha**2*(1.0+(-1.0+2.0*alpha**2)*v2**2)+alpha**2*(1.0+(-1.0+2.0*alpha**2)*v1**2))*x1*x2)
+        term00S=term_cross_num/(60.0*alpha*alpha*k**2*norm_denom) if alpha*alpha != 0 else 0.0
         uetc_val=np.array([term00, termS, termV, termT, term00S])*sf
         return np.nan_to_num(uetc_val)
 
     # --- Regime 2: ETC ---
     if abs(x1 - x2) <= etcmin:
-        x = xp; alpha=(alpha1+alpha2)/2.0; v=(v1+v2)/2.0; mu=(mu1+mu2)/2.0
+        x = xp; alpha=(alpha+alpha)/2.0; v=(v1+v2)/2.0; mu=(mu+mu)/2.0
         if alpha==0: return np.zeros(5)
-        norm_denom_etc_sq = (1.0 - v**2);
-        if norm_denom_etc_sq <= 1e-16 : return np.zeros(5)
-        norm_denom_etc = np.sqrt(norm_denom_etc_sq)
 
-        mu = (mu1 + mu2) / 2.0; tau=(tau1+tau2)/2; xi=(xi1+xi2)/2
+        norm_denom_etc_sq = (1.0 - v**2);
+        if norm_denom_etc_sq <= 1e-16 : return uetc_val
+        norm_denom_etc = math.sqrt(norm_denom_etc_sq)
+
+        tau=(tau1+tau2)/2; xi=(xi1+xi2)/2
 
         # Recalculate common factors
-        sf = scaling_factor(tau, tau, xi, xi, L_decay)
+        sf = scaling_factor(tau, tau, xi, xi, L, 2)
         common_factor_base = 1 / (k**2*norm_denom)
         common_factor = mu**2*common_factor_base
         base_etc_factor=common_factor
 
-        cosx=np.cos(x); sinx=np.sin(x); six=sine_integral(x)
+        cosx=math.cos(x); sinx=math.sin(x); 
+        six, _ = sici_numba(x)
         if abs(x) < 1e-12: sinx_over_x = 1.0
         else: sinx_over_x = sinx / x
 
@@ -283,7 +293,7 @@ def get_correlators(tau1, tau2, k, SPR_base):
             else: term2_s=term2_s_num / x
             term3_s=(8+8*(-2+alpha**2)*v**2+(8-8*alpha**2+11*alpha**4)*v**4)*x**3*six
             termS_num=term1_s+term2_s+term3_s
-            termS=termS_num/(16.0*alpha**2*x**2) if (x!=0 and alpha!=0) else 0.0
+            termS=termS_num/(16.0*alpha**2*x**2)
         uetc_val[1]=termS * base_etc_factor
         if x==0 or alpha==0: termV=0.0
         else:
@@ -292,7 +302,7 @@ def get_correlators(tau1, tau2, k, SPR_base):
              else: tV1_sub = (x**3 + 3.0*x*cosx - 3.0*sinx) / (3.0 * x**3)
              term1_v=(2.0*(8.0+8.0*(-2.0+alpha**2)*v**2+(8.0-8.0*alpha**2+3*alpha**4)*v**4))*tV1_sub
              term2_v=alpha**4*v**4*(-2.0+cosx+sinx_over_x+x*six)
-             termV_num=term1_v+term2_v; termV=termV_num/(8.0*alpha**2) if alpha!=0 else 0.0
+             termV_num=term1_v+term2_v; termV=termV_num/(8.0*alpha**2)
         uetc_val[2]=termV * base_etc_factor
         if x==0 or alpha==0: termT=0.0
         else:
@@ -303,78 +313,121 @@ def get_correlators(tau1, tau2, k, SPR_base):
             else: term2_t = term2_t_num / x
             term3_t=3*(8+8*(-2+alpha**2)*v**2+(8-8*alpha**2+3*alpha**4)*v**4)*x**3*six
             termT_num=term1_t+term2_t+term3_t
-            termT=termT_num/(96.0*alpha**2*x**2) if (x!=0 and alpha!=0) else 0.0
+            termT=termT_num/(96.0*alpha**2*x**2)
         uetc_val[3]=termT * base_etc_factor
         if x==0:
             term00S_num=0.0
         else: term00S_num=((2+(-2+alpha**2)*v**2)*(-4+cosx+3*sinx_over_x+x*six))
         term00S=term00S_num/(2.) if norm_denom_etc>1e-12 else 0.0
         uetc_val[4]=term00S*base_etc_factor
-        uetc_val *= sf; return np.nan_to_num(uetc_val)
+        
+        # Apply scaling
+        for i in range(5):
+            uetc_val[i] *= sf
+        return uetc_val
 
     # --- Regime 3: General Case ---
-    n_terms_raw = max(min_terms, int(scale_terms * xp))
-    n_terms = min(n_terms_raw, MAX_N_TERMS)
-    use_approx = abs(x1 - x2) >= xapr
+    # Parameters from global scope: min_terms=10, scale_terms=15.0, MAX_N_TERMS=75, xapr=2.5
+    n_terms_raw = max(10, int(15.0 * xp))
+    n_terms = min(n_terms_raw, 75)
+    use_approx = abs(x1 - x2) >= 2.5
     small_rho = rho < 1e-2
-    if use_approx: I1=I1_int_a(min(x1,x2),rho_safe); I4=I4_int_a(min(x1,x2),rho_safe)
-    else: I1=I1_int(xm,rho_safe,n_terms)-I1_int(xp,rho_safe,n_terms); I4=I4_int(xm,rho_safe,n_terms)-I4_int(xp,rho_safe,n_terms);
+    
+    if use_approx: 
+        I1=I1_int_a_numba(min(x1,x2),rho_safe); I4=I4_int_a_numba(min(x1,x2),rho_safe)
+    else: 
+        I1=I1_int_numba(xm,rho_safe,n_terms)-I1_int_numba(xp,rho_safe,n_terms); 
+        I4=I4_int_numba(xm,rho_safe,n_terms)-I4_int_numba(xp,rho_safe,n_terms);
+        
     if not use_approx and small_rho: I4 = I1 / 2.0
-    I2=I2_int(xm,rho_safe)-I2_int(xp,rho_safe); I3=I3_int(xm,rho_safe)-I3_int(xp,rho_safe)
+    
+    I2=I2_int_numba(xm,rho_safe)-I2_int_numba(xp,rho_safe); 
+    I3=I3_int_numba(xm,rho_safe)-I3_int_numba(xp,rho_safe)
+    
     if not use_approx and small_rho: I5=I2/2.0; I6=I3/2.0
-    else: I5=I5_int(xm,rho_safe)-I5_int(xp,rho_safe); I6=I6_int(xm,rho_safe)-I6_int(xp,rho_safe)
-    integrals = [I1, I2, I3, I4, I5, I6];
-    if not all(np.isfinite(i) for i in integrals): return np.zeros(5)
-    safe_a1a2rho2=max(2.*alpha1*alpha2*rho_safe**2,1e-30); safe_a1a2=max(2.*alpha1*alpha2,1e-30)
+    else: 
+        I5=I5_int_numba(xm,rho_safe)-I5_int_numba(xp,rho_safe); 
+        I6=I6_int_numba(xm,rho_safe)-I6_int_numba(xp,rho_safe)
+    
+    # Check finiteness
+    if not (math.isfinite(I1) and math.isfinite(I2) and math.isfinite(I3) and math.isfinite(I4) and math.isfinite(I5) and math.isfinite(I6)):
+        return uetc_val
+        
+    safe_a1a2rho2=max(2.*alpha*alpha*rho_safe**2,1e-30); safe_a1a2=max(2.*alpha*alpha,1e-30)
 
-    sum00=2*alpha1*alpha2*I1; uetc_val[0]=sum00*common_factor
-    c_term1=(-27*(alpha1*alpha2*v1*v2)**2+rho_safe**2*(1+(-1+2*alpha1**2)*v1**2)*(1+(-1+2*alpha2**2)*v2**2))/safe_a1a2rho2
-    c_term2=(-3*(-9*(alpha1*alpha2*v1*v2)**2+rho_safe**2*(-1+v2**2+v1**2*(1+(-1+(alpha1*alpha2)**2)*v2**2))))/safe_a1a2rho2
-    c_term3=(-9*(1+(-1+alpha1**2)*v1**2)*(1+(-1+alpha2**2)*v2**2))/safe_a1a2
-    c_term4=(-3*(-(alpha2**2*rho_safe**2*(-1+v1**2)*v2**2)+alpha1**2*v1**2*(-18*alpha2**2*v2**2+rho_safe**2*(1+(-1+4*alpha2**2)*v2**2))))/safe_a1a2rho2
-    c_term5=(3*(-(alpha2**2*rho_safe**2*(-1+v1**2)*v2**2)+alpha1**2*v1**2*(-18*alpha2**2*v2**2+rho_safe**2*(1+(-1+4*alpha2**2)*v2**2))))/safe_a1a2rho2
-    c_term6=(9*(-(alpha2**2*(-1+v1**2)*v2**2)+alpha1**2*v1**2*(1+(-1+2*alpha2**2)*v2**2)))/safe_a1a2
+    sum00=2*alpha*alpha*I1; uetc_val[0]=sum00*common_factor
+    c_term1=(-27*(alpha*alpha*v1*v2)**2+rho_safe**2*(1+(-1+2*alpha**2)*v1**2)*(1+(-1+2*alpha**2)*v2**2))/safe_a1a2rho2
+    c_term2=(-3*(-9*(alpha*alpha*v1*v2)**2+rho_safe**2*(-1+v2**2+v1**2*(1+(-1+(alpha*alpha)**2)*v2**2))))/safe_a1a2rho2
+    c_term3=(-9*(1+(-1+alpha**2)*v1**2)*(1+(-1+alpha**2)*v2**2))/safe_a1a2
+    c_term4=(-3*(-(alpha**2*rho_safe**2*(-1+v1**2)*v2**2)+alpha**2*v1**2*(-18*alpha**2*v2**2+rho_safe**2*(1+(-1+4*alpha**2)*v2**2))))/safe_a1a2rho2
+    c_term5=(3*(-(alpha**2*rho_safe**2*(-1+v1**2)*v2**2)+alpha**2*v1**2*(-18*alpha**2*v2**2+rho_safe**2*(1+(-1+4*alpha**2)*v2**2))))/safe_a1a2rho2
+    c_term6=(9*(-(alpha**2*(-1+v1**2)*v2**2)+alpha**2*v1**2*(1+(-1+2*alpha**2)*v2**2)))/safe_a1a2
     sumS=c_term1*I1+c_term2*I2+c_term3*I3+c_term4*I4+c_term5*I5+c_term6*I6; uetc_val[1]=sumS*common_factor
-    safe_rho2_local=max(rho_safe**2,1e-30); safe_a1a2_local=max(alpha1*alpha2,1e-30)
-    c_term1=(3*alpha1*alpha2*v1**2*v2**2)/safe_rho2_local; c_term2=(-3*alpha1*alpha2*v1**2*v2**2)/safe_rho2_local
-    c_term3=((1+(-1+alpha1**2)*v1**2)*(1+(-1+alpha2**2)*v2**2))/safe_a1a2_local
-    c_term4=(alpha1*alpha2*(-6+rho_safe**2)*v1**2*v2**2)/safe_rho2_local; c_term5=-((alpha1*alpha2*(-6+rho_safe**2)*v1**2*v2**2)/safe_rho2_local)
-    c_term6=(alpha2**2*(-1+v1**2)*v2**2-alpha1**2*v1**2*(1+(-1+2*alpha2**2)*v2**2))/safe_a1a2_local
+    safe_rho2_local=max(rho_safe**2,1e-30); safe_a1a2_local=max(alpha*alpha,1e-30)
+    c_term1=(3*alpha*alpha*v1**2*v2**2)/safe_rho2_local; c_term2=(-3*alpha*alpha*v1**2*v2**2)/safe_rho2_local
+    c_term3=((1+(-1+alpha**2)*v1**2)*(1+(-1+alpha**2)*v2**2))/safe_a1a2_local
+    c_term4=(alpha*alpha*(-6+rho_safe**2)*v1**2*v2**2)/safe_rho2_local; c_term5=-((alpha*alpha*(-6+rho_safe**2)*v1**2*v2**2)/safe_rho2_local)
+    c_term6=(alpha**2*(-1+v1**2)*v2**2-alpha**2*v1**2*(1+(-1+2*alpha**2)*v2**2))/safe_a1a2_local
     sumV=c_term1*I1+c_term2*I2+c_term3*I3+c_term4*I4+c_term5*I5+c_term6*I6; uetc_val[2]=sumV*common_factor
-    safe_4a1a2rho2=max(4.0*alpha1*alpha2*rho_safe**2,1e-30); safe_4a1a2=max(4.0*alpha1*alpha2,1e-30)
-    c_term1=(-3.0*(alpha1*alpha2*v1*v2)**2+rho_safe**2*(-1.0+v1**2)*(-1.0+v2**2))/safe_4a1a2rho2
-    c_term2=(3.0*(alpha1*alpha2*v1*v2)**2+rho_safe**2*(-1.0+v2**2+v1**2*(1.0+(-1.0+(alpha1*alpha2)**2)*v2**2)))/safe_4a1a2rho2
-    c_term3=-((1.0+(-1.0+alpha1**2)*v1**2)*(1.0+(-1.0+alpha2**2)*v2**2))/safe_4a1a2
-    c_term4=(-(alpha2**2*rho_safe**2*(-1.0+v1**2)*v2**2)+alpha1**2*v1**2*(6.0*alpha2**2*v2**2-rho_safe**2*(-1.0+v2**2)))/safe_4a1a2rho2
-    c_term5=(alpha2**2*rho_safe**2*(-1.0+v1**2)*v2**2+alpha1**2*v1**2*(-6.0*alpha2**2*v2**2+rho_safe**2*(-1.0+v2**2)))/safe_4a1a2rho2
-    c_term6=(-(alpha2**2*(-1.0+v1**2)*v2**2)+alpha1**2*v1**2*(1.0+(-1.0+2.0*alpha2**2)*v2**2))/safe_4a1a2
+    safe_4a1a2rho2=max(4.0*alpha*alpha*rho_safe**2,1e-30); safe_4a1a2=max(4.0*alpha*alpha,1e-30)
+    c_term1=(-3.0*(alpha*alpha*v1*v2)**2+rho_safe**2*(-1.0+v1**2)*(-1.0+v2**2))/safe_4a1a2rho2
+    c_term2=(3.0*(alpha*alpha*v1*v2)**2+rho_safe**2*(-1.0+v2**2+v1**2*(1.0+(-1.0+(alpha*alpha)**2)*v2**2)))/safe_4a1a2rho2
+    c_term3=-((1.0+(-1.0+alpha**2)*v1**2)*(1.0+(-1.0+alpha**2)*v2**2))/safe_4a1a2
+    c_term4=(-(alpha**2*rho_safe**2*(-1.0+v1**2)*v2**2)+alpha**2*v1**2*(6.0*alpha**2*v2**2-rho_safe**2*(-1.0+v2**2)))/safe_4a1a2rho2
+    c_term5=(alpha**2*rho_safe**2*(-1.0+v1**2)*v2**2+alpha**2*v1**2*(-6.0*alpha**2*v2**2+rho_safe**2*(-1.0+v2**2)))/safe_4a1a2rho2
+    c_term6=(-(alpha**2*(-1.0+v1**2)*v2**2)+alpha**2*v1**2*(1.0+(-1.0+2.0*alpha**2)*v2**2))/safe_4a1a2
     sumT=c_term1*I1+c_term2*I2+c_term3*I3+c_term4*I4+c_term5*I5+c_term6*I6; uetc_val[3]=sumT*common_factor
-    c_term1=(-(alpha2**2*(-1+v1**2))+alpha1**2*(1-v2**2+2*alpha2**2*(v1**2+v2**2)))/safe_a1a2
-    c_term2=(-3*(-(alpha2**2*(-1+v1**2))+alpha1**2*(1-v2**2+alpha2**2*(v1**2+v2**2))))/safe_a1a2
-    c_term3=0.0; c_term4=(-3*alpha1*alpha2*(v1**2+v2**2))/2.0; c_term5=(3*alpha1*alpha2*(v1**2+v2**2))/2.0; c_term6=0.0
+    c_term1=(-(alpha**2*(-1+v1**2))+alpha**2*(1-v2**2+2*alpha**2*(v1**2+v2**2)))/safe_a1a2
+    c_term2=(-3*(-(alpha**2*(-1+v1**2))+alpha**2*(1-v2**2+alpha**2*(v1**2+v2**2))))/safe_a1a2
+    c_term3=0.0; c_term4=(-3*alpha*alpha*(v1**2+v2**2))/2.0; c_term5=(3*alpha*alpha*(v1**2+v2**2))/2.0; c_term6=0.0
     sumC=c_term1*I1+c_term2*I2+c_term3*I3+c_term4*I4+c_term5*I5+c_term6*I6; uetc_val[4]=sumC*common_factor
 
-    return np.nan_to_num(uetc_val)
+    return uetc_val
 
 # ========================================================================
 # Correlator calculation helper
 # ========================================================================
 
-def calculate_correlators_serial(i, j, ntau_local, tau_vals_local, k_value_local, spr_base_local):
+@njit(parallel=True, cache=True, fastmath=True)
+def compute_matrices_numba(tau_vals_local, k_value_local, mu, alpha, L, vos_tau, vos_xi, vos_v):
     """
-    Serial helper function that will be fed into parallelization later. Also helps avoid unnecessary calculations
-    by enforcing symmetry.
+    Parallelized Numba function to compute all correlator matrices for a given k.
+    Replaces the serial Python double loop.
     """
-    if j < i: return i, j, None # Lower triangle, will be filled by symmetry
-    tau1 = tau_vals_local[i]
-    tau2 = tau_vals_local[j]
+    n = len(tau_vals_local)
+    # 5 matrices: 00, S, V, T, 00S
+    mat00 = np.zeros((n, n), dtype=np.float64)
+    matS = np.zeros((n, n), dtype=np.float64)
+    matV = np.zeros((n, n), dtype=np.float64)
+    matT = np.zeros((n, n), dtype=np.float64)
+    mat00S = np.zeros((n, n), dtype=np.float64)
 
-    if tau1 <= 0 or tau2 <= 0 or k_value_local <= 0:
-        uetc_results_raw = np.zeros(5)
-    else:
-        uetc_results_raw = get_correlators(tau1, tau2, k_value_local, spr_base_local)
-
-    return i, j, uetc_results_raw
+    # Parallel loop
+    for i in prange(n):
+        for j in range(i, n):
+            tau1 = tau_vals_local[i]
+            tau2 = tau_vals_local[j]
+            
+            if tau1 <= 0 or tau2 <= 0 or k_value_local <= 0:
+                # default zeros, already set
+                pass
+            else:
+                res = get_correlators(tau1, tau2, k_value_local, mu, alpha, L, vos_tau, vos_xi, vos_v)
+                
+                mat00[i, j] = res[0]
+                matS[i, j] = res[1]
+                matV[i, j] = res[2]
+                matT[i, j] = res[3]
+                mat00S[i, j] = res[4]
+                
+                if i != j:
+                    mat00[j, i] = res[0]
+                    matS[j, i] = res[1]
+                    matV[j, i] = res[2]
+                    matT[j, i] = res[3]
+                    mat00S[j, i] = res[4]
+                    
+    return mat00, matS, matV, matT, mat00S
 
 
 # ========================================================================
@@ -446,26 +499,21 @@ def calculate_eigenvectors(k_val, spr_parameters, tau_vals_local, weighting_loca
     as a dictionary.
     """
 
-    correlator_matrices = {key: np.zeros((ntau_calc, ntau_calc)) for key in ['UETC_00','UETC_S','UETC_V','UETC_T','UETC_00S']}
+    correlator_matrices = {}
 
-    # Calculate correlator matrices
-    for i in range(ntau_calc):
-        for j in range(i, ntau_calc): # Iterate only for upper triangle + diagonal
-            _, _, raw_uetc_results = calculate_correlators_serial(
-                i, j, ntau_calc, tau_vals_local, k_val, spr_parameters
-            )
-            if raw_uetc_results is not None:
-                correlator_matrices['UETC_00'][i,j] = raw_uetc_results[0]
-                correlator_matrices['UETC_S'][i,j]  = raw_uetc_results[1]
-                correlator_matrices['UETC_V'][i,j]  = raw_uetc_results[2]
-                correlator_matrices['UETC_T'][i,j]  = raw_uetc_results[3]
-                correlator_matrices['UETC_00S'][i,j]= raw_uetc_results[4]
-                if i != j: # Symmetrize
-                    correlator_matrices['UETC_00'][j,i] = raw_uetc_results[0]
-                    correlator_matrices['UETC_S'][j,i]  = raw_uetc_results[1]
-                    correlator_matrices['UETC_V'][j,i]  = raw_uetc_results[2]
-                    correlator_matrices['UETC_T'][j,i]  = raw_uetc_results[3]
-                    correlator_matrices['UETC_00S'][j,i]= raw_uetc_results[4]
+    # Calculate correlator matrices - NOW USING NUMBA ACCELERATION
+    # Pass scalars instead of class objects to Numba
+    m00, mS, mV, mT, m00S = compute_matrices_numba(
+        tau_vals_local, k_val, 
+        spr_parameters.mu, spr_parameters.alpha, spr_parameters.L,
+        vos_tau_arr, vos_xi_arr, vos_v_arr
+    )
+    
+    correlator_matrices['UETC_00'] = m00
+    correlator_matrices['UETC_S'] = mS
+    correlator_matrices['UETC_V'] = mV
+    correlator_matrices['UETC_T'] = mT
+    correlator_matrices['UETC_00S'] = m00S
 
     # Diagonalize
     diag_results = diagonalize_correlators(
@@ -491,15 +539,7 @@ def calculate_eigenvectors(k_val, spr_parameters, tau_vals_local, weighting_loca
 # Final utility functions
 # ========================================================================
 
-def worker_calculate_for_k(args_tuple):
-    """
-    Helper for parallelization
-    """
-    k_val, spr_params, tau_grid_worker, weighting_param, nmodes_param = args_tuple
-    result_for_k,_ = calculate_eigenvectors(
-        k_val, spr_params, tau_grid_worker, weighting_param, nmodes_param
-    )
-    return k_val, result_for_k
+# Removed worker_calculate_for_k as we are not using multiprocess anymore
 
 def align_eigenvector_signs(eigenfunctions_array, eigenfunctions_deriv_array):
     """
@@ -526,7 +566,7 @@ def align_eigenvector_signs(eigenfunctions_array, eigenfunctions_deriv_array):
 
     # Process each eigenfunction type separately
     for type_idx in range(num_eigen_types):
-        print(f"  Processing eigenfunction type {type_idx}...")
+        # print(f"  Processing eigenfunction type {type_idx}...") # Commented out for cleaner output
 
         # For each mode within this type
         for mode_idx in range(nmodes):
@@ -764,7 +804,7 @@ if __name__ == "__main__":
          )
 
     # Compute correlator table
-    print("--- Starting UETC Eigenvector Table Generation ---") # Modified print
+    print("--- Starting UETC Eigenvector Table Generation (Numba Accelerated) ---") # Modified print
     overall_start_time = time.time()
 
     k_grid = np.logspace(np.log10(k_min), np.log10(k_max), nk)
@@ -782,91 +822,86 @@ if __name__ == "__main__":
     all_eigenvalues_V = np.zeros((nk, nmodes), dtype=np.float64)
     all_eigenvalues_T = np.zeros((nk, nmodes), dtype=np.float64)
 
-    tasks_args = [(k_val, SPRa, ktau_grid / k_val, weighting, nmodes) for k_val in k_grid]
+    # Replaced concurrent futures with serial loop over k
+    # Numba parallelizes the heavy inner loops over tau, which is more efficient
+    print(f"Starting k-loop for {nk} k-values (ntau={nktau} per k)...")
 
-    num_workers = max(1, os.cpu_count() - 1 if os.cpu_count() else 1)
-    print(f"Starting k-loop with {num_workers} workers for {nk} k-values (ntau={nktau} per k)...")
-
-    k_to_idx_map = {k_val: idx for idx, k_val in enumerate(k_grid)}
     processed_k_count = 0
-
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        future_to_k = {executor.submit(worker_calculate_for_k, args_tuple): args_tuple[0] for args_tuple in tasks_args}
-
-        for future in concurrent.futures.as_completed(future_to_k):
-            original_k_val = future_to_k[future]
-            k_idx = k_to_idx_map[original_k_val]
+    
+    for k_idx, k_val in enumerate(k_grid):
+        
+        try:
+            # Prepare arguments for serial call
+            tau_grid_worker = ktau_grid / k_val
+            
+            # Compute directly (Numba handles the speed now)
+            data_for_k, _ = calculate_eigenvectors(
+                k_val, SPRa, tau_grid_worker, weighting, nmodes
+            )
+            
             processed_k_count += 1
-            try:
-                _, data_for_k = future.result()
+            
+            if data_for_k:
+                # Store eigenfunctions as before
+                all_eigenfunctions[k_idx, 0, :, :] = data_for_k['eigenvectors_00']
+                all_eigenfunctions[k_idx, 1, :, :] = data_for_k['eigenvectors_S']
+                all_eigenfunctions[k_idx, 2, :, :] = data_for_k['eigenvectors_V']
+                all_eigenfunctions[k_idx, 3, :, :] = data_for_k['eigenvectors_T']
 
-                if data_for_k and 'error' not in data_for_k:
-                    # Store eigenfunctions as before
-                    all_eigenfunctions[k_idx, 0, :, :] = data_for_k['eigenvectors_00']
-                    all_eigenfunctions[k_idx, 1, :, :] = data_for_k['eigenvectors_S']
-                    all_eigenfunctions[k_idx, 2, :, :] = data_for_k['eigenvectors_V']
-                    all_eigenfunctions[k_idx, 3, :, :] = data_for_k['eigenvectors_T']
+                all_eigenvalues_S[k_idx, :] = data_for_k['eigenvalues_S']
+                all_eigenvalues_00[k_idx, :] = data_for_k['eigenvalues_00']
 
-                    all_eigenvalues_S[k_idx, :] = data_for_k['eigenvalues_S']
-                    all_eigenvalues_00[k_idx, :] = data_for_k['eigenvalues_00']
+                all_eigenvalues_V[k_idx, :] = data_for_k['eigenvalues_V']
+                all_eigenvalues_T[k_idx, :] = data_for_k['eigenvalues_T']
 
-                    all_eigenvalues_V[k_idx, :] = data_for_k['eigenvalues_V']
-                    all_eigenvalues_T[k_idx, :] = data_for_k['eigenvalues_T']
+                current_k_val_for_deriv = k_grid[k_idx] # Use the actual k value from the grid
 
-                    current_k_val_for_deriv = k_grid[k_idx] # Use the actual k value from the grid
-
-                    # Ensure k_val is positive before taking log
-                    if current_k_val_for_deriv <= 0:
-                        print(f"Warning: k_val <= 0 ({current_k_val_for_deriv}) at k_idx={k_idx}, cannot compute log(kτ). Skipnp.ping derivative.")
-                        # Derivatives will remain zero for this k_idx if this happens
-                    else:
-                        log_ktau_axis = np.log(ktau_grid)
-
-                        for type_idx_deriv in range(2): # 0 for evec_00, 1 for evec_S
-                            for mode_idx_deriv in range(nmodes):
-                                eigenfunc_values_1d = all_eigenfunctions[k_idx, type_idx_deriv, mode_idx_deriv, :]
-
-                                if np.all(np.isnan(eigenfunc_values_1d)) or eigenfunc_values_1d.size < 2 : # Need at least 2 points for spline
-                                    all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
-                                    continue
-                                try:
-                                    valid_indices = ~np.isnan(eigenfunc_values_1d)
-                                    if np.sum(valid_indices) < 2: # Need at least 2 valid points
-                                         all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
-                                         continue
-
-                                    spl = scipy.interpolate.CubicSpline(log_ktau_axis[valid_indices], eigenfunc_values_1d[valid_indices], extrapolate=False)
-                                    deriv_vals_on_grid = spl.derivative(nu=1)(log_ktau_axis) # Evaluate on original log_ktau grid points
-
-                                    all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = deriv_vals_on_grid
-
-                                except ValueError as ve:
-                                    # This can happen if log_ktau_axis is not strictly increasing, or other spline issues.
-                                    print(f"CubicSpline ValueError for k_idx={k_idx}, type={type_idx_deriv}, mode={mode_idx_deriv}: {ve}")
-                                    all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
-                                except Exception as e_spline:
-                                    print(f"Spline/Derivative ERROR for k_idx={k_idx}, type={type_idx_deriv}, mode={mode_idx_deriv}: {e_spline}")
-                                    all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
-                        # Derivatives for V and T are set to 0 for now, as not immediately used based on old code analysis
-                        all_eigenfunctions_d_dlogkt[k_idx, 2, :, :] = 0.0 # Type 2: Vector
-                        all_eigenfunctions_d_dlogkt[k_idx, 3, :, :] = 0.0 # Type 3: Tensor
-
-                elif data_for_k and 'error' in data_for_k:
-                     print(f"Processed k = {original_k_val:.4e} (index {k_idx}) but DIAGONALIZATION FAILED: {data_for_k['error']}. {processed_k_count}/{nk} done.")
-                     # Ensure derivative tables are also NaN for this k_idx
-                     all_eigenfunctions_d_dlogkt[k_idx, :, :, :] = np.nan
+                # Ensure k_val is positive before taking log
+                if current_k_val_for_deriv <= 0:
+                    print(f"Warning: k_val <= 0 ({current_k_val_for_deriv}) at k_idx={k_idx}, cannot compute log(kτ). Skipnp.ping derivative.")
+                    # Derivatives will remain zero for this k_idx if this happens
                 else:
-                     print(f"Processed k = {original_k_val:.4e} (index {k_idx}) but received None result. {processed_k_count}/{nk} done.")
-                     all_eigenfunctions_d_dlogkt[k_idx, :, :, :] = np.nan
+                    log_ktau_axis = np.log(ktau_grid)
 
+                    for type_idx_deriv in range(2): # 0 for evec_00, 1 for evec_S
+                        for mode_idx_deriv in range(nmodes):
+                            eigenfunc_values_1d = all_eigenfunctions[k_idx, type_idx_deriv, mode_idx_deriv, :]
 
-            except Exception as exc:
-                print(f"Task for k={original_k_val:.4e} (index {k_idx}) generated an EXCEPTION: {exc}. {processed_k_count}/{nk} done.")
-                all_eigenfunctions[k_idx, :, :, :] = np.nan # Ensure main table is also NaN
-                all_eigenfunctions_d_dlogkt[k_idx, :, :, :] = np.nan
+                            if np.all(np.isnan(eigenfunc_values_1d)) or eigenfunc_values_1d.size < 2 : # Need at least 2 points for spline
+                                all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
+                                continue
+                            try:
+                                valid_indices = ~np.isnan(eigenfunc_values_1d)
+                                if np.sum(valid_indices) < 2: # Need at least 2 valid points
+                                        all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
+                                        continue
 
-            if processed_k_count % max(1, nk // 10) == 0 or processed_k_count == nk:
-                 print(f"Progress: {processed_k_count}/{nk} k-values processed.")
+                                spl = scipy.interpolate.CubicSpline(log_ktau_axis[valid_indices], eigenfunc_values_1d[valid_indices], extrapolate=False)
+                                deriv_vals_on_grid = spl.derivative(nu=1)(log_ktau_axis) # Evaluate on original log_ktau grid points
+
+                                all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = deriv_vals_on_grid
+
+                            except ValueError as ve:
+                                # This can happen if log_ktau_axis is not strictly increasing, or other spline issues.
+                                print(f"CubicSpline ValueError for k_idx={k_idx}, type={type_idx_deriv}, mode={mode_idx_deriv}: {ve}")
+                                all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
+                            except Exception as e_spline:
+                                print(f"Spline/Derivative ERROR for k_idx={k_idx}, type={type_idx_deriv}, mode={mode_idx_deriv}: {e_spline}")
+                                all_eigenfunctions_d_dlogkt[k_idx, type_idx_deriv, mode_idx_deriv, :] = np.nan
+                    # Derivatives for V and T are set to 0 for now, as not immediately used based on old code analysis
+                    all_eigenfunctions_d_dlogkt[k_idx, 2, :, :] = 0.0 # Type 2: Vector
+                    all_eigenfunctions_d_dlogkt[k_idx, 3, :, :] = 0.0 # Type 3: Tensor
+            else:
+                    print(f"Processed k = {k_val:.4e} (index {k_idx}) but received None result. {processed_k_count}/{nk} done.")
+                    all_eigenfunctions_d_dlogkt[k_idx, :, :, :] = np.nan
+
+        except Exception as exc:
+            print(f"Task for k={k_val:.4e} (index {k_idx}) generated an EXCEPTION: {exc}. {processed_k_count}/{nk} done.")
+            all_eigenfunctions[k_idx, :, :, :] = np.nan # Ensure main table is also NaN
+            all_eigenfunctions_d_dlogkt[k_idx, :, :, :] = np.nan
+
+        if processed_k_count % max(1, nk // 10) == 0 or processed_k_count == nk:
+                print(f"Progress: {processed_k_count}/{nk} k-values processed.")
 
     # Apply sign alignment to eigenfunctions and derivatives
     print("\n--- Applying Sign Alignment ---")

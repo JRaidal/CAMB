@@ -86,7 +86,7 @@ def parse_arguments():
     parser.add_argument(
         '--gmu',
         type=float,
-        default=2e-7,
+        default=1.58e-7,
         help='String tension parameter (default: 2e-7)'
     )
 
@@ -122,7 +122,7 @@ def setup_camb_params(args):
 
     # Set maximum l values for different modes
     if args.tensor:
-        pars.max_l_tensor = 1500
+        pars.max_l_tensor = 2500
     if args.scalar or args.vector:
         pars.max_l = 4000  # For scalar and vector modes
 
@@ -143,7 +143,7 @@ def load_correlator_data(args):
     t_start_load = time.time()
     if args.datafile is None:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        npz_filename = os.path.join(script_dir, "correlator_table_fast.npz")
+        npz_filename = os.path.join(script_dir, "correlator_table.npz")
     else:
         npz_filename = args.datafile
 
