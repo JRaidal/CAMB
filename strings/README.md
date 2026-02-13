@@ -15,6 +15,7 @@ This directory contains a high-performance pipeline for computing the contributi
 To calculate and plot CMB power spectra for a specific string model (Default includes Scalar, Vector, and Tensor modes):
 ```bash
 python string_simulation.py --alpha 1.9 --cr 0.23 --lmax 4000 --gmu 1.58e-7
+```
 
 ### Create training data
 Modify the correlator parameters inside create_training_data and run
