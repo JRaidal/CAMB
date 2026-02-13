@@ -1,6 +1,16 @@
 ===================
+CAMBActive
+=================== 
+
+This is a fork of `CAMB <https://github.com/cmbant/CAMB>`_ extended to compute CMB power spectra from active sources.
+ 
+A detailed implementation for cosmic string networks is contained in the ``strings/`` directory — see its README for details.
+
+
+===================
 CAMB
 ===================
+
 :CAMB: Code for Anisotropies in the Microwave Background
 :Author: Antony Lewis and Anthony Challinor
 :Homepage: https://camb.info/

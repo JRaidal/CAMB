@@ -206,6 +206,49 @@ def align_eigenvector_signs_numba(eigenfunctions, derivatives):
 # SECTION 3: CALCULATION AND PLOTTING
 # ===================================================================== #
 
+def plot_uetc_evecs_reconstruction(k_to_plot, tau_values, alpha, mu, gamma, nmodes_diag, vos_v, vos_xi, vos_tau, cfg, uetc_n_levels=15):
+    """Ported from string_correlators.py: Sanity check visualization."""
+    if plt is None: return
+    print(f"--- Generating UETC, E-vec, & Reconstruction plots for k = {k_to_plot:.4e} ---")
+    ntau = len(tau_values)
+    log_kt_axis = np.log10(k_to_plot * tau_values)
+    mu_sq = mu**2
+    mats = build_uetc_mats(tau_values, k_to_plot, mu, alpha, 0.95, vos_v, vos_xi, vos_tau, cfg)
+    diag = _diagonalise(mats, tau_values, k_to_plot, gamma, nmodes_diag)
+    
+    correlator_data_scaled = [np.full((ntau, ntau), np.nan) for _ in range(5)]
+    for comp_idx, raw_matrix in enumerate(mats):
+        for i in range(ntau):
+            for j in range(ntau):
+                plot_display_scaling = (tau_values[i] * tau_values[j])**0.5 / mu_sq if mu_sq != 0 else 0
+                correlator_data_scaled[comp_idx][j, i] = raw_matrix[j, i] * plot_display_scaling
+
+    reconstructed_correlator = [np.full((ntau, ntau), np.nan) for _ in range(5)]
+    tau_i_mesh, tau_j_mesh = np.meshgrid(tau_values, tau_values, indexing='ij')
+    W_unweight = np.power((k_to_plot**2 * tau_i_mesh * tau_j_mesh), gamma) * np.sqrt(tau_i_mesh * tau_j_mesh)
+    
+    # Reconstruct Scalar
+    u00, uS, lS = diag['evec_00'], diag['evec_S'], diag['eval_S']
+    reconstructed_correlator[0] = (np.einsum('p,pi,pj->ij', lS, u00, u00) / W_unweight).T * np.sqrt(tau_i_mesh * tau_j_mesh) / mu_sq
+    reconstructed_correlator[1] = (np.einsum('p,pi,pj->ij', lS, uS, uS) / W_unweight).T * np.sqrt(tau_i_mesh * tau_j_mesh) / mu_sq
+    reconstructed_correlator[4] = (np.einsum('p,pi,pj->ij', lS, u00, uS) / W_unweight).T * np.sqrt(tau_i_mesh * tau_j_mesh) / mu_sq
+    # Vectors/Tensors
+    reconstructed_correlator[2] = (np.einsum('p,pi,pj->ij', diag['eval_V'], diag['evec_V'], diag['evec_V']) / W_unweight).T * np.sqrt(tau_i_mesh * tau_j_mesh) / mu_sq
+    reconstructed_correlator[3] = (np.einsum('p,pi,pj->ij', diag['eval_T'], diag['evec_T'], diag['evec_T']) / W_unweight).T * np.sqrt(tau_i_mesh * tau_j_mesh) / mu_sq
+
+    fig, axes = plt.subplots(5, 3, figsize=(15, 20), constrained_layout=True)
+    titles = ["00 Type", "S Type", "V Type", "T Type", "00S Cross"]
+    evec_keys = ['evec_00', 'evec_S', 'evec_V', 'evec_T', None]
+    for comp_idx in range(5):
+        axes[comp_idx, 0].contourf(log_kt_axis, log_kt_axis, correlator_data_scaled[comp_idx], levels=uetc_n_levels, cmap='jet')
+        axes[comp_idx, 0].set_title(f"Original {titles[comp_idx]}")
+        if comp_idx < 4:
+            for m in range(min(5, nmodes_diag)): axes[comp_idx, 1].plot(log_kt_axis, diag[evec_keys[comp_idx]][m, :])
+            axes[comp_idx, 1].set_title(f"Top E-vecs {titles[comp_idx]}")
+        axes[comp_idx, 2].contourf(log_kt_axis, log_kt_axis, reconstructed_correlator[comp_idx], levels=uetc_n_levels, cmap='jet')
+        axes[comp_idx, 2].set_title(f"Reco {titles[comp_idx]}")
+    plt.show()
+
 def generate_correlators_and_eigensystem(args, verbose=True):
     if verbose: print("1. Generating UETC correlators and eigensystem...")
     k_grid = np.logspace(np.log10(args.k_min), np.log10(args.k_max), args.nk)
@@ -217,12 +260,16 @@ def generate_correlators_and_eigensystem(args, verbose=True):
     if verbose: print("   - Solving background cosmology and VOS model...")
     vos_tau, vos_xi, vos_v = _solve_cosmology_and_vos(5000, 1e-4, 8e17, args.cr, omegas, H0_Mpc_inv)
     if verbose: print("   - VOS solution complete.")
+    
+    if hasattr(args, 'plot_uetc') and args.plot_uetc:
+        k_ref = 0.05 * (args.H0 / 100.0)
+        plot_uetc_evecs_reconstruction(k_ref, ktau_grid/k_ref, args.alpha, 1.0, args.weighting_gamma, nmodes, vos_v, vos_xi, vos_tau, cfg)
+
     ntypes, efuncs, efuncs_derivs = 4, np.zeros((args.nk, 4, nmodes, args.nktau)), np.zeros((args.nk, 4, nmodes, args.nktau))
     evals = {name: np.zeros((args.nk, nmodes)) for name in ['S','00','V','T']}
     fixed_mu, fixed_L = 1.0, 0.95
     if verbose: print(f"   - Using fixed internal string parameters: mu={fixed_mu}, L={fixed_L}")
 
-    # <-- CHANGE 1: WRAP THE K-LOOP WITH TQDM -->
     iterator = tqdm(k_grid, desc="   - Building correlators (k-loop)", ncols=100, unit="k", disable=not verbose)
     for ik, k in enumerate(iterator):
         tau_vec = ktau_grid/k
@@ -240,7 +287,6 @@ def generate_correlators_and_eigensystem(args, verbose=True):
                         spl = CubicSpline(log_ktau_axis[valid], ef_1d[valid], extrapolate=False)
                         efuncs_derivs[ik,type_idx,mode_idx,:] = spl.derivative(1)(log_ktau_axis)
         except Exception as e:
-            # Use the iterator's console write method to avoid breaking the bar
             iterator.write(f"\nWarning: Error processing k={k:.4e}: {e}")
             efuncs[ik,...],efuncs_derivs[ik,...] = np.nan,np.nan
             for name in evals: evals[name][ik,...] = np.nan
@@ -248,6 +294,14 @@ def generate_correlators_and_eigensystem(args, verbose=True):
     if verbose: print("\n   - Aligning eigenvector signs...")
     efuncs, efuncs_derivs = align_eigenvector_signs_numba(efuncs, efuncs_derivs)
     if verbose: print("   - Sign alignment complete.")
+
+    if hasattr(args, 'save_correlators') and args.save_correlators:
+        out_file = "correlator_table.npz"
+        np.savez(out_file, k_grid=k_grid, ktau_grid=ktau_grid, eigenfunctions=efuncs, eigenfunctions_d_dlogkt=efuncs_derivs, 
+                 eigenvalues_S=evals['S'], eigenvalues_00=evals['00'], eigenvalues_V=evals['V'], eigenvalues_T=evals['T'], 
+                 string_params_mu=fixed_mu, nmodes=nmodes, weighting_gamma=args.weighting_gamma)
+        if verbose: print(f"   - Correlator table saved to {out_file}")
+
     return {'k_grid':k_grid, 'ktau_grid':ktau_grid, 'eigenfunctions':efuncs, 'eigenfunctions_d_dlogkt':efuncs_derivs, 'eigenvalues_S':evals['S'], 'eigenvalues_00':evals['00'], 'eigenvalues_V':evals['V'], 'eigenvalues_T':evals['T'], 'string_params_mu':fixed_mu, 'nmodes':nmodes, 'weighting_gamma':args.weighting_gamma}
 
 def setup_camb_params(args, verbose=True):
@@ -352,6 +406,7 @@ def main():
     g_phys.add_argument('--alpha', type=float, default=1.0, help='String model parameter alpha')
     g_phys.add_argument('--cr', type=float, default=0.5, help='VOS loop chopping efficiency c_r')
     g_cosmo = parser.add_argument_group('Cosmological Parameters')
+    # Use standard Planck 2018 values by default
     g_cosmo.add_argument('--H0', type=float, default=67.5, help='Hubble constant [km/s/Mpc]')
     g_cosmo.add_argument('--Omega_matter', type=float, default=0.315, help='Total matter density Omega_m')
     g_cosmo.add_argument('--Omega_lambda', type=float, default=0.685, help='Dark energy density Omega_Lambda')
@@ -372,6 +427,8 @@ def main():
     g_out.add_argument('--output', '-o', type=str, default=None, help='Filename for final C_l plot')
     g_out.add_argument('--no-plot', action='store_true', help='Disable final C_l plot')
     g_phys.add_argument('--gmu', type=float, default=1.58e-7, help='String tension parameter G*mu (for plotting only)')
+    g_out.add_argument('--plot-uetc', action='store_true', help='Plot UETC, eigenvectors and reconstruction comparison')
+    g_out.add_argument('--save-correlators', action='store_true', help='Save the calculated correlator table to .npz')
 
     args = parser.parse_args()
     if not (args.scalar or args.vector or args.tensor):
