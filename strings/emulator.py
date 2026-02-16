@@ -38,7 +38,7 @@ CONFIG = {
     'learning_rate': 5e-4,
     'weight_decay': 1e-1,
     'epochs': 2000,
-    'patience': 100,  # Early stopping patience
+    'patience': 100,
 
     # Log transform parameters
     'log_floor': 1e-30,  # Floor value for log transform

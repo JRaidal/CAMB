@@ -1,12 +1,10 @@
 {
-  "params_file": "string_training_big_params.npz",
-  "spectra_file": "string_training_big_spectra.npz",
+  "params_file": "string_training_parameters.npz",
+  "spectra_file": "string_training_spectra.npz",
   "train_frac": 0.8,
   "val_frac": 0.1,
   "test_frac": 0.1,
   "hidden_layers": [
-    512,
-    512,
     512,
     512,
     256
@@ -15,7 +13,7 @@
   "dropout": 0.0,
   "batch_size": 64,
   "learning_rate": 0.0005,
-  "weight_decay": 1e-05,
+  "weight_decay": 0.1,
   "epochs": 2000,
   "patience": 100,
   "log_floor": 1e-30,

@@ -18,7 +18,7 @@ python string_simulation.py --alpha 1.9 --cr 0.23 --lmax 4000 --gmu 1.58e-7
 ```
 
 ### Create training data
-Modify the correlator parameters inside create_training_data and run
+Modify the correlator parameters inside create_training_data.py and run the script to generate emulator training data.
 
 ### Train emulator
 Train the emulator using emulator.py. This can then be directly used in an MCMC code (like cobaya) to accurately predict the string anisotropy spectra.
